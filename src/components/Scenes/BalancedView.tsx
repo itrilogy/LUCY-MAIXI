@@ -1,15 +1,16 @@
 import React from 'react';
 import { VitalSigns } from '@/types';
 import { VitalSignsChart } from '@/components';
-import { Activity, ShieldCheck, Zap, Thermometer, Wind, Binary } from 'lucide-react';
+import { Activity, ShieldCheck, Zap, Wind } from 'lucide-react';
+import SessionRateStats from '@/components/Dashboard/SessionRateStats';
 
 interface BalancedViewProps {
     vitalSigns: VitalSigns;
     avgHeartRate: number;
     avgRespRate: number;
-    minHeartRate: number;
+    minHeartRate?: number;
     maxHeartRate: number;
-    minRespRate: number;
+    minRespRate?: number;
     maxRespRate: number;
     isReady: boolean;
 }
@@ -18,9 +19,7 @@ const BalancedView: React.FC<BalancedViewProps> = ({
     vitalSigns,
     avgHeartRate,
     avgRespRate,
-    minHeartRate,
     maxHeartRate,
-    minRespRate,
     maxRespRate,
     isReady
 }) => {
@@ -51,7 +50,7 @@ const BalancedView: React.FC<BalancedViewProps> = ({
 
                             <div className="flex flex-col gap-4">
                                 <div className="flex justify-between items-end">
-                                    <span className="text-xs font-black text-slate-500 uppercase tracking-widest">压力指数 (实时计算)</span>
+                                    <span className="text-xs font-black text-slate-500 uppercase tracking-widest">压力指数 (启发式)</span>
                                     <span className={`text-3xl font-black italic tabular-nums ${stressColor}`}>{Math.round(stressIndex)}%</span>
                                 </div>
                                 <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden border border-slate-200/50 p-1 shadow-inner">
@@ -67,11 +66,11 @@ const BalancedView: React.FC<BalancedViewProps> = ({
                         <div className="grid grid-cols-2 gap-6 mt-10">
                             <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100">
                                 <span className="text-xs font-black text-slate-400 uppercase tracking-widest block mb-2">呼吸深度解析</span>
-                                <span className="text-xl font-black text-slate-950 italic">深度/稳定</span>
+                                <span className="text-xl font-black text-slate-950 italic">{isReady ? (vitalSigns.respQuality || '--') : '--'}</span>
                             </div>
                             <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100">
                                 <span className="text-xs font-black text-slate-400 uppercase tracking-widest block mb-2">氧流代谢评估</span>
-                                <span className="text-xl font-black text-slate-950 italic">最佳状态</span>
+                                <span className="text-xl font-black text-slate-950 italic">{isReady ? `${vitalSigns.bvpSNR.toFixed(1)} dB` : '--'}</span>
                             </div>
                         </div>
                     </div>
@@ -88,7 +87,7 @@ const BalancedView: React.FC<BalancedViewProps> = ({
                             <div className="flex items-start gap-4">
                                 <div className="w-2 h-2 rounded-full bg-emerald-500 mt-2 flex-shrink-0 animate-pulse"></div>
                                 <p className="text-sm text-slate-600 font-medium leading-relaxed">
-                                    心率变异性（HRV）处于中高水位，表明自律神经系统调节功能优异。当前采集环境光照稳定，BVP 置信度极高。
+                                    当前展示的是 SCAMPS 双任务协议下的心率与呼吸率。质量以 SNR 为准，失败时显示为无效而不是默认心率。
                                 </p>
                             </div>
                             <div className="flex items-start gap-4">
@@ -143,16 +142,7 @@ const BalancedView: React.FC<BalancedViewProps> = ({
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4 bg-slate-50 p-5 rounded-3xl border border-slate-100">
-                            <div className="flex flex-col gap-1">
-                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">本次均值</span>
-                                <span className="text-xl font-black text-slate-950 italic tabular-nums">{Math.round(avgHeartRate) || '--'}</span>
-                            </div>
-                            <div className="flex flex-col gap-1">
-                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">采集最高</span>
-                                <span className="text-xl font-black text-rose-600 italic tabular-nums">{maxHeartRate > 0 && maxHeartRate < 300 ? Math.round(maxHeartRate) : '--'}</span>
-                            </div>
-                        </div>
+                        <SessionRateStats avg={avgHeartRate} max={maxHeartRate} />
                     </div>
                 </div>
 
@@ -218,16 +208,7 @@ const BalancedView: React.FC<BalancedViewProps> = ({
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4 bg-slate-50 p-5 rounded-3xl border border-slate-100 text-blue-900/60">
-                            <div className="flex flex-col gap-1 text-slate-900">
-                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">均值解算</span>
-                                <span className="text-xl font-black italic tabular-nums">{Math.round(avgRespRate) || '--'}</span>
-                            </div>
-                            <div className="flex flex-col gap-1 text-blue-600">
-                                <span className="text-[9px] font-black uppercase tracking-widest text-blue-400">最高频率</span>
-                                <span className="text-xl font-black italic tabular-nums">{maxRespRate > 0 && maxRespRate < 300 ? Math.round(maxRespRate) : '--'}</span>
-                            </div>
-                        </div>
+                        <SessionRateStats avg={avgRespRate} max={maxRespRate} accentClass="text-blue-600" />
                     </div>
                 </div>
 

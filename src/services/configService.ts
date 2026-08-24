@@ -1,12 +1,12 @@
 // src/services/configService.ts
-import { ApplicationPaths, Paths } from '@/utils/paths';
+import { ApplicationPaths } from '@/utils/paths';
 
 export type ModelConfig = {
     FRAME_NUM: number;
     TASKS: string[];
     FS: number;
     sampling_rate: number;
-    input_size: any; // Flexible for multi-input
+    input_size: number[] | Record<string, number[]>; // Flexible for multi-input
     output_names: string[];
     modelType?: string; // New: 'TSCAN', 'BigSmall', 'PhysFormer', 'Balanced'
     model_info: {
@@ -45,8 +45,11 @@ class ConfigService {
     }
 
     public async getConfig(configPath?: string): Promise<ModelConfig> {
-        if (configPath || !this.config) {
-            this.config = await this.loadConfig(configPath);
+        if (configPath) {
+            return this.loadConfig(configPath);
+        }
+        if (!this.config) {
+            this.config = await this.loadConfig();
         }
         return this.config;
     }
@@ -65,8 +68,9 @@ class ConfigService {
             }
 
             // Object based multi-input
-            if (typeof inputSize === 'object' && inputSize?.width) {
-                return inputSize.width;
+            if (typeof inputSize === 'object' && inputSize !== null && 'width' in inputSize) {
+                const w = (inputSize as Record<string, unknown>).width;
+                if (typeof w === 'number') return w;
             }
 
             return 72;
@@ -86,8 +90,9 @@ class ConfigService {
                 return inputSize[inputSize.length - 2];
             }
 
-            if (typeof inputSize === 'object' && inputSize?.height) {
-                return inputSize.height;
+            if (typeof inputSize === 'object' && inputSize !== null && 'height' in inputSize) {
+                const h = (inputSize as Record<string, unknown>).height;
+                if (typeof h === 'number') return h;
             }
 
             return 72;

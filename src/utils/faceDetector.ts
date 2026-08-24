@@ -195,13 +195,10 @@ export class FaceDetector {
         this.initialGracePeriod = true;
         this.frameCounter = 0;
 
-        // Start grace period timer
+        this.isCapturing = true;
         setTimeout(() => {
             this.initialGracePeriod = false;
-            console.log('Face detection grace period ended');
         }, this.GRACE_PERIOD_DURATION);
-
-        console.log('Face detection started');
     }
 
     /**

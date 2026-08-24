@@ -1,21 +1,31 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { VitalSigns } from '@/types';
 import { VitalSignsChart } from '@/components';
-import { Binary, Waves, Sigma, Microscope } from 'lucide-react';
+import { Binary, Waves, Microscope } from 'lucide-react';
+import { poincarePoints } from '@/utils/hrv';
+import SessionRateStats from '@/components/Dashboard/SessionRateStats';
 
 interface ExpertViewProps {
     vitalSigns: VitalSigns;
     avgHeartRate: number;
-    avgRespRate: number;
+    avgRespRate?: number;
+    minHeartRate?: number;
+    maxHeartRate?: number;
     isReady: boolean;
 }
 
 const ExpertView: React.FC<ExpertViewProps> = ({
     vitalSigns,
     avgHeartRate,
-    avgRespRate,
+    minHeartRate = 0,
+    maxHeartRate = 0,
     isReady
 }) => {
+    const hrv = vitalSigns.hrv;
+    const points = useMemo(
+        () => poincarePoints(vitalSigns.filteredBvpSignal || [], 30),
+        [vitalSigns.filteredBvpSignal]
+    );
     return (
         <div className="expert-view-container space-y-12 mb-8 animate-fade-in">
             {/* Precision Backplane Matrix */}
@@ -41,9 +51,12 @@ const ExpertView: React.FC<ExpertViewProps> = ({
                                     <span className="text-3xl font-black text-slate-950 italic tabular-nums">{vitalSigns.bvpSNR?.toFixed(1) || '--'} <span className="text-xs opacity-30">dB</span></span>
                                 </div>
                                 <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100 transition-all hover:bg-white hover:shadow-xl hover:shadow-slate-200/50 group/item">
-                                    <span className="text-xs font-black text-slate-400 uppercase tracking-widest block mb-1.5 group-hover/item:text-slate-600 transition-colors">采样频率</span>
-                                    <span className="text-3xl font-black text-slate-950 italic tabular-nums">30.0 <span className="text-xs opacity-30">Hz</span></span>
+                                    <span className="text-xs font-black text-slate-400 uppercase tracking-widest block mb-1.5 group-hover/item:text-slate-600 transition-colors">实时心率</span>
+                                    <span className="text-3xl font-black text-slate-950 italic tabular-nums">{isReady && vitalSigns.heartRate > 0 ? Math.round(vitalSigns.heartRate) : '--'} <span className="text-xs opacity-30">BPM</span></span>
                                 </div>
+                            </div>
+                            <div className="mt-6">
+                                <SessionRateStats avg={avgHeartRate} min={minHeartRate} max={maxHeartRate} />
                             </div>
 
                             <div className="p-8 bg-slate-50 rounded-[3rem] border border-slate-100 mt-8 shadow-inner">
@@ -56,9 +69,9 @@ const ExpertView: React.FC<ExpertViewProps> = ({
                                 </div>
                                 <div className="space-y-4">
                                     {[
-                                        { label: 'Jitter Index', value: '0.024ms' },
-                                        { label: 'Skewness', value: '-0.125' },
-                                        { label: 'Kurtosis', value: '3.44' }
+                                        { label: 'Mean IBI', value: hrv ? `${hrv.meanIbiMs.toFixed(0)} ms` : '--' },
+                                        { label: 'SDNN', value: hrv ? `${hrv.sdnn.toFixed(1)} ms` : '--' },
+                                        { label: 'RMSSD', value: hrv ? `${hrv.rmssd.toFixed(1)} ms` : '--' }
                                     ].map((stat, i) => (
                                         <div key={i} className="flex justify-between items-center px-5 py-3 bg-white rounded-2xl border border-slate-100 shadow-sm hover:scale-[1.02] transition-transform">
                                             <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{stat.label}</span>
@@ -100,18 +113,24 @@ const ExpertView: React.FC<ExpertViewProps> = ({
 
                             {/* Data Points Simulation */}
                             <div className="absolute inset-0">
-                                {[...Array(160)].map((_, i) => (
-                                    <div
-                                        key={i}
-                                        className="absolute w-1.5 h-1.5 rounded-full bg-indigo-500/40 transition-all duration-1000"
-                                        style={{
-                                            left: `${15 + Math.random() * 70}%`,
-                                            top: `${15 + Math.random() * 70}%`,
-                                            opacity: isReady ? 1 : 0,
-                                            transform: `scale(${0.5 + Math.random()})`
-                                        }}
-                                    />
-                                ))}
+                                {points.length === 0 && (
+                                    <div className="absolute inset-0 flex items-center justify-center text-xs font-black text-slate-400 uppercase tracking-widest">
+                                        等待稳定 IBI
+                                    </div>
+                                )}
+                                {points.map((pt, i) => {
+                                    const min = 333;
+                                    const max = 1500;
+                                    const left = 8 + ((pt.x - min) / (max - min)) * 84;
+                                    const top = 92 - ((pt.y - min) / (max - min)) * 84;
+                                    return (
+                                        <div
+                                            key={i}
+                                            className="absolute w-1.5 h-1.5 rounded-full bg-indigo-500/70"
+                                            style={{ left: `${left}%`, top: `${top}%` }}
+                                        />
+                                    );
+                                })}
                             </div>
 
                             {/* Ellipse Mapping */}
@@ -130,11 +149,11 @@ const ExpertView: React.FC<ExpertViewProps> = ({
                         <div className="flex gap-16">
                             <div className="flex flex-col">
                                 <span className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1.5">SD1 (瞬时变异性)</span>
-                                <span className="text-4xl font-black text-slate-900 tabular-nums italic tracking-tighter">42.4<span className="text-sm opacity-30 ml-1">ms</span></span>
+                                <span className="text-4xl font-black text-slate-900 tabular-nums italic tracking-tighter">{hrv ? hrv.sd1.toFixed(1) : '--'}<span className="text-sm opacity-30 ml-1">ms</span></span>
                             </div>
                             <div className="flex flex-col">
                                 <span className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1.5">SD2 (长期变异性)</span>
-                                <span className="text-4xl font-black text-slate-900 tabular-nums italic tracking-tighter">108.5<span className="text-sm opacity-30 ml-1">ms</span></span>
+                                <span className="text-4xl font-black text-slate-900 tabular-nums italic tracking-tighter">{hrv ? hrv.sd2.toFixed(1) : '--'}<span className="text-sm opacity-30 ml-1">ms</span></span>
                             </div>
                         </div>
                         <div className="flex flex-col items-end gap-3">
@@ -166,7 +185,7 @@ const ExpertView: React.FC<ExpertViewProps> = ({
                         <div className="w-px h-10 bg-slate-200"></div>
                         <div className="flex flex-col items-end">
                             <span className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">质量评分</span>
-                            <span className="text-xs font-black text-emerald-600 italic">极佳</span>
+                            <span className="text-xs font-black text-emerald-600 italic">{vitalSigns.bvpQuality}</span>
                         </div>
                     </div>
                 </div>

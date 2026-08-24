@@ -1,5 +1,5 @@
 import React from 'react';
-import { Heart, Activity, Sliders, Thermometer } from 'lucide-react';
+import { Heart, Activity, Sliders } from 'lucide-react';
 
 interface MetricCardProps {
     label: string;
@@ -36,7 +36,7 @@ const MetricCard: React.FC<MetricCardProps> = ({
     };
 
     return (
-        <div className="group relative bg-white p-5 2xl:p-6 rounded-[2.5rem] border border-slate-200 shadow-[0_20px_60px_rgba(15,23,42,0.03)] transition-all duration-700 hover:shadow-[0_40px_100px_rgba(15,23,42,0.08)] hover:-translate-y-2 overflow-hidden">
+        <div className={`group relative bg-white p-5 2xl:p-6 rounded-[2.5rem] border border-slate-200 shadow-[0_20px_60px_rgba(15,23,42,0.03)] transition-all duration-700 hover:shadow-[0_40px_100px_rgba(15,23,42,0.08)] hover:-translate-y-2 overflow-hidden ${colorClass}`}>
             {/* Design Grain / Texture */}
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_2px_2px,_rgba(0,0,0,0.01)_1px,_transparent_0)] bg-[size:24px_24px] pointer-events-none"></div>
 

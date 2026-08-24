@@ -8,6 +8,7 @@ interface GlobalMetricsRowProps {
     avgRespRate: number;
     isReady: boolean;
     bufferProgress: number;
+    hideResp?: boolean;
 }
 
 const GlobalMetricsRow: React.FC<GlobalMetricsRowProps> = ({
@@ -15,10 +16,11 @@ const GlobalMetricsRow: React.FC<GlobalMetricsRowProps> = ({
     avgHeartRate,
     avgRespRate,
     isReady,
-    bufferProgress
+    bufferProgress,
+    hideResp = false
 }) => {
     return (
-        <div className="grid grid-cols-3 gap-3 md:gap-4 animate-fade-in w-full">
+        <div className={`grid ${hideResp ? 'grid-cols-2' : 'grid-cols-3'} gap-3 md:gap-4 animate-fade-in w-full`}>
             <MetricCard
                 label="心率 (BPM)"
                 value={vitalSigns.heartRate}
@@ -31,6 +33,7 @@ const GlobalMetricsRow: React.FC<GlobalMetricsRowProps> = ({
                 status={vitalSigns.heartRate > 0 ? (vitalSigns.heartRate > 100 ? '偏高' : '已锁定') : '搜寻中'}
             />
 
+            {!hideResp && (
             <MetricCard
                 label="呼吸率 (RPM)"
                 value={vitalSigns.respRate}
@@ -42,6 +45,7 @@ const GlobalMetricsRow: React.FC<GlobalMetricsRowProps> = ({
                 bufferProgress={bufferProgress}
                 status={vitalSigns.respRate > 0 ? '平稳' : '采样中'}
             />
+            )}
 
             <MetricCard
                 label="信号置信度"

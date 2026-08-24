@@ -106,7 +106,7 @@ const VitalSignsChart: React.FC<VitalSignsChartProps> = ({
                 }
             }
         };
-    }, [title, rate, snr, type]);
+    }, [title, type]);
 
     // Chart data with x-axis adjusted for display samples
     const chartData = useMemo(() => {

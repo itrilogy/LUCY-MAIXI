@@ -49,7 +49,7 @@ class PathManager {
             const cleanPath = path.replace(/^\//, '');
 
             // Determine base URL
-            let baseUrl = this.getBaseUrl();
+            const baseUrl = this.getBaseUrl();
 
             // Special handling for CDN
             if (baseUrl.startsWith('https://cdn.jsdelivr.net/gh')) {

@@ -35,8 +35,8 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             <Info className="w-6 h-6" />
                         </div>
                         <div>
-                            <h2 className="text-2xl font-black text-slate-950 uppercase italic tracking-tight leading-none">关于 BioPulse 3.2</h2>
-                            <p className="text-xs font-black text-rose-600 uppercase tracking-widest mt-2 block">生理信号提取验证平台</p>
+                            <h2 className="text-2xl font-black text-slate-950 tracking-tight leading-none">关于脉息 · MaiXi</h2>
+                            <p className="text-xs font-black text-rose-600 uppercase tracking-widest mt-2 block">光映微澜，脉息自明</p>
                         </div>
                     </div>
                     <button
@@ -54,8 +54,8 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                     <section className="bg-rose-50/50 rounded-[2rem] p-6 border border-rose-100 flex items-start gap-4">
                         <Users className="w-5 h-5 text-rose-500 flex-shrink-0 mt-0.5" />
                         <div>
-                            <h3 className="text-sm font-black text-slate-950 uppercase tracking-widest mb-1">产品作者 / Author</h3>
-                            <p className="text-slate-700 font-medium">鹿溪联合创新实验室，Kwangwah Hung</p>
+                            <h3 className="text-sm font-black text-slate-950 uppercase tracking-widest mb-1">出品方 / Producer</h3>
+                            <p className="text-slate-700 font-medium">鹿溪联合创新实验室（LUXI Joint Innovation Lab）</p>
                         </div>
                     </section>
 
@@ -67,13 +67,13 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                         </div>
                         <div className="prose prose-slate prose-sm text-slate-600 font-medium leading-relaxed max-w-none">
                             <p>
-                                <strong>BioPulse 3.2 (基于 MMRPhys-Live)</strong> 是一个基于视觉的远程生理感知 (rPPG) Web 平台，能够直接从普通网络摄像头视频流中实时提取心率 (Heart Rate) 和呼吸率 (Respiratory Rate)。
+                                <strong>脉息 · MaiXi（PulseStream，基于 MMRPhys-Live）</strong> 是一个基于视觉的远程生理感知 (rPPG) Web 平台，能够直接从普通网络摄像头视频流中无感提取心率 (Heart Rate) 和呼吸率 (Respiratory Rate)。
                             </p>
                             <ul className="space-y-1 mt-2 mb-4 list-disc pl-5">
-                                <li><strong>前端隔离架构：</strong> 采用 React SPA 模式，将繁重的深度学习推理和信号处理（Butterworth 滤波、FFT 频域分析）通过 Web Workers 分离至后台现成，确保高平滑的 30FPS UI 渲染。</li>
-                                <li><strong>多模型与全场景矩阵：</strong> 突破了原始 MMRPhys-Live 单一模型的局限，深度集成了四大独立架构引擎（TS-CAN 极轻量流式网络、SCAMPS 主力卷积、BigSmall 多任务复合网络、PhysFormer 时空 Transformer），分别精准映射至基础前测、标准监控、疲劳预警与科研高精四大核心运行场景。</li>
-                                <li><strong>时间差分驱动模型：</strong> 基于 3D 卷积神经网络 (3D CNN) 的 MMRPhysSEF 模型架构。系统输入的是 72x72 分辨率的面部时间差分序列 (Time Difference)，这有效地消除了环境光的 DC 缓变，强化了由于血容量搏动引起的面部微观颜色与运动变化。</li>
-                                <li><strong>本地级实时引擎：</strong> 基于 ONNX Runtime Web，充分利用浏览器端 WebAssembly 和 SIMD 硬件指令集加速，使得 3D 卷积推理无需 GPU 也可流畅运行于普通设备。</li>
+                                <li><strong>默认协议：</strong>「标准健康监测」使用 SCAMPS 72×72、RGB/255 预处理、12 s 起算与 30 s FFT，与 mmrphys-live-base 对齐。</li>
+                                <li><strong>场景按任务展示：</strong> TS-CAN / PhysFormer 只显示 BVP；BigSmall 显示 AU 真值；HRV 仅在抽出稳定 IBI 后计算。</li>
+                                <li><strong>失败可见：</strong> 谱峰无效或 SNR 不足时显示 --，不再回退到 75 / 15 等假读数。</li>
+                                <li><strong>本地推理：</strong> ONNX Runtime Web（WASM + SIMD），摄像头与视频文件均按 30 Hz 抽帧。</li>
                             </ul>
                         </div>
                     </section>

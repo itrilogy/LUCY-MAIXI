@@ -20,10 +20,10 @@ interface MainDashboardProps {
 }
 
 const SCENE_METADATA: Record<SceneType, { name: string; icon: string; hideResp?: boolean }> = {
-    lite: { name: '基础快速检测', icon: '⚡' },
+    lite: { name: '基础快速检测', icon: '⚡', hideResp: true },
     balanced: { name: '标准健康监测', icon: '⚖️' },
     pro: { name: '驾驶/疲劳监测', icon: '🚗' },
-    expert: { name: '科研高精分析', icon: '🧬' }
+    expert: { name: '科研高精分析', icon: '🧬', hideResp: true }
 };
 
 const MainDashboard: React.FC<MainDashboardProps> = ({
@@ -81,6 +81,10 @@ const MainDashboard: React.FC<MainDashboardProps> = ({
                         vitalSigns={vitalSigns}
                         avgHeartRate={avgHeartRate}
                         avgRespRate={avgRespRate}
+                        minHeartRate={minHeartRate}
+                        maxHeartRate={maxHeartRate}
+                        minRespRate={minRespRate}
+                        maxRespRate={maxRespRate}
                         isReady={isReady}
                     />
                 )}
@@ -89,6 +93,8 @@ const MainDashboard: React.FC<MainDashboardProps> = ({
                         vitalSigns={vitalSigns}
                         avgHeartRate={avgHeartRate}
                         avgRespRate={avgRespRate}
+                        minHeartRate={minHeartRate}
+                        maxHeartRate={maxHeartRate}
                         isReady={isReady}
                     />
                 )}

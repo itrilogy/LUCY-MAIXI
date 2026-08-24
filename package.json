@@ -1,5 +1,6 @@
 {
-  "name": "vital-signs-monitor",
+  "name": "maixi-biopulse",
+  "description": "脉息 (MaiXi / PulseStream) - 基于普通摄像头的无感远程生理特征提取平台 · 鹿溪联合创新实验室",
   "private": true,
   "version": "0.1.0",
   "type": "module",

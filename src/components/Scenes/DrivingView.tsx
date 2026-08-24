@@ -2,22 +2,33 @@ import React from 'react';
 import { VitalSigns } from '@/types';
 import { VitalSignsChart } from '@/components';
 import { ShieldCheck, Eye, AlertCircle, Gauge } from 'lucide-react';
+import SessionRateStats from '@/components/Dashboard/SessionRateStats';
 
 interface DrivingViewProps {
     vitalSigns: VitalSigns;
     avgHeartRate: number;
-    avgRespRate: number;
+    avgRespRate?: number;
+    minHeartRate?: number;
+    maxHeartRate?: number;
+    minRespRate?: number;
+    maxRespRate?: number;
     isReady: boolean;
 }
 
 const DrivingView: React.FC<DrivingViewProps> = ({
     vitalSigns,
     avgHeartRate,
-    avgRespRate,
+    avgRespRate = 0,
+    maxHeartRate = 0,
+    maxRespRate = 0,
     isReady
 }) => {
-    // Simulated fatigue calculation
-    const fatigueRisk = Math.min(100, (vitalSigns.heartRate < 65 ? 30 : 0) + (vitalSigns.respRate < 12 ? 40 : 10));
+    const aus = vitalSigns.actionUnits ?? [];
+    const auLabels = ['AU01', 'AU02', 'AU04', 'AU06', 'AU07', 'AU10', 'AU12', 'AU14', 'AU15', 'AU17', 'AU23', 'AU24'];
+    const au4 = aus[2] ?? 0;
+    const au15 = aus[8] ?? 0;
+    const hrPenalty = vitalSigns.heartRate > 0 && vitalSigns.heartRate < 55 ? 20 : 0;
+    const fatigueRisk = Math.min(100, Math.max(0, (au4 + au15) * 40 + hrPenalty));
     const isHighRisk = fatigueRisk > 60;
 
     return (
@@ -69,7 +80,7 @@ const DrivingView: React.FC<DrivingViewProps> = ({
                                 {isHighRisk ? '关键预警' : '安全区域'}
                             </span>
                         </div>
-                        <p className="text-[11px] text-slate-400 italic font-medium">驾驶舱疲劳评估：基于面部血流灌注稳定性</p>
+                        <p className="text-[11px] text-slate-400 italic font-medium">启发式：AU04+AU15 强度，不作临床诊断</p>
                     </div>
                 </div>
 
@@ -91,15 +102,21 @@ const DrivingView: React.FC<DrivingViewProps> = ({
                     </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 relative z-10">
-                        {['AU01', 'AU04', 'AU06', 'AU12', 'AU25', 'AU45', 'Blink', 'Gaze'].map((au) => (
+                        {auLabels.map((au, index) => {
+                            const value = aus[index];
+                            const pct = value === undefined ? 0 : Math.min(100, Math.max(0, value * 100));
+                            return (
                             <div key={au} className="p-6 bg-slate-50 rounded-[2.5rem] border border-slate-100 flex flex-col items-center transition-all hover:bg-white hover:shadow-xl hover:shadow-slate-200/50 hover:-translate-y-1">
                                 <span className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">{au}</span>
                                 <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden mb-3 shadow-inner">
-                                    <div className="h-full bg-amber-500 rounded-full" style={{ width: `${30 + Math.random() * 50}%` }}></div>
+                                    <div className="h-full bg-amber-500 rounded-full" style={{ width: `${pct}%` }}></div>
                                 </div>
-                                <span className="text-xs font-black text-slate-900 italic tracking-tight uppercase">锁定中</span>
+                                <span className="text-xs font-black text-slate-900 italic tracking-tight uppercase">
+                                    {value === undefined ? '--' : value.toFixed(2)}
+                                </span>
                             </div>
-                        ))}
+                            );
+                        })}
                     </div>
 
                     {/* Background Grid Pattern Overlay */}
@@ -119,12 +136,16 @@ const DrivingView: React.FC<DrivingViewProps> = ({
                             <span className="text-xs font-black text-slate-400 uppercase tracking-[0.1em] mt-2 block">BVP 信号收敛度分析</span>
                         </div>
                     </div>
-                    <div className="flex items-center gap-4">
-                        <div className="px-4 py-2 bg-slate-50 rounded-xl border border-slate-100">
-                            <span className="text-xs font-black text-slate-900 italic tracking-widest uppercase">采样版本 v3.2</span>
-                        </div>
+                    <div className="flex items-center gap-4 min-w-[16rem]">
+                        <SessionRateStats avg={avgHeartRate} max={maxHeartRate} />
                     </div>
                 </div>
+                {avgRespRate > 0 || maxRespRate > 0 ? (
+                    <div className="mb-6 max-w-md">
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2">呼吸会话统计</span>
+                        <SessionRateStats avg={avgRespRate} max={maxRespRate} accentClass="text-blue-600" />
+                    </div>
+                ) : null}
                 <div className="h-80 relative z-10">
                     <VitalSignsChart
                         title=""

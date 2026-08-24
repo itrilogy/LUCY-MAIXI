@@ -85,61 +85,44 @@ export class ButterworthFilter {
     //     }
     // }
 
-    // Apply forward-backward zero-phase filter (filtfilt equivalent)
+    /**
+     * Forward-backward zero-phase bandpass (scipy-like filtfilt) with odd padding.
+     * Each call is stateless with respect to previous windows.
+     */
     public applyButterworthBandpass(signal: number[]): number[] {
         if (signal.length === 0) return [];
-
-        // Create output array
-        const output = new Array(signal.length);
-
-        // Apply single-pass IIR filter with proper state management
-        // This implementation uses classic direct form II structure
-
-        // For debugging - check if coefficients look reasonable
-        if (this.a.length !== this.b.length) {
-            console.warn(`Filter coefficient arrays have different lengths: a=${this.a.length}, b=${this.b.length}`);
+        if (signal.length < this.a.length * 3) {
+            return this.lfilter(signal);
         }
-
-        // Copy the signal to avoid modifying the original
-        const inputSignal = [...signal];
-
-        // Add debug logging 
-        console.log(`Filtering signal: length=${signal.length}, first few values=[${signal.slice(0, 5).join(', ')}]`);
-        console.log(`Filter coefficients: a=[${this.a.slice(0, 3).join(', ')}...], b=[${this.b.slice(0, 3).join(', ')}...]`);
 
         try {
-            // Apply the filter directly
-            for (let i = 0; i < inputSignal.length; i++) {
-                // Initialize output sample with input * b[0]
-                output[i] = this.b[0] * inputSignal[i];
-
-                // Add contributions from previous inputs (if any)
-                for (let j = 1; j < this.b.length; j++) {
-                    if (i - j >= 0) {
-                        output[i] += this.b[j] * inputSignal[i - j];
-                    }
-                }
-
-                // Subtract contributions from previous outputs (feedback)
-                for (let j = 1; j < this.a.length; j++) {
-                    if (i - j >= 0) {
-                        output[i] -= this.a[j] * output[i - j];
-                    }
-                }
-            }
-
-            // Log some statistics about the output
-            const nonZeroCount = output.filter(v => v !== 0).length;
-            const outputMean = output.reduce((sum, val) => sum + val, 0) / output.length;
-            const firstFewOutput = output.slice(0, 5).join(', ');
-            console.log(`Filter output: nonZeroValues=${nonZeroCount}/${output.length}, mean=${outputMean.toFixed(6)}, first few=[${firstFewOutput}]`);
-
-            return output;
-        } catch (error) {
-            console.error("Error in Butterworth filter:", error);
-            // Return unfiltered signal as fallback
-            return inputSignal;
+            const padlen = 3 * (Math.max(this.a.length, this.b.length) - 1);
+            const padded = oddExtend(signal, padlen);
+            const forward = this.lfilter(padded);
+            const backward = this.lfilter(forward.slice().reverse());
+            return backward.reverse().slice(padlen, padlen + signal.length);
+        } catch {
+            return signal.slice();
         }
+    }
+
+    private lfilter(input: number[]): number[] {
+        const n = input.length;
+        const output = new Array<number>(n);
+        const na = this.a.length;
+        const nb = this.b.length;
+
+        for (let i = 0; i < n; i++) {
+            let acc = this.b[0] * input[i];
+            for (let j = 1; j < nb; j++) {
+                if (i - j >= 0) acc += this.b[j] * input[i - j];
+            }
+            for (let j = 1; j < na; j++) {
+                if (i - j >= 0) acc -= this.a[j] * output[i - j];
+            }
+            output[i] = acc;
+        }
+        return output;
     }
 
     public applyMovingAverage(signal: number[], windowSize: number): number[] {
@@ -165,4 +148,21 @@ export class ButterworthFilter {
 
         return result;
     }
+}
+
+function oddExtend(signal: number[], padlen: number): number[] {
+    if (signal.length === 0 || padlen <= 0) return signal.slice();
+    const n = signal.length;
+    const left: number[] = [];
+    const right: number[] = [];
+    const x0 = signal[0];
+    const xn = signal[n - 1];
+    for (let i = 1; i <= padlen; i++) {
+        const li = Math.min(i, n - 1);
+        const ri = Math.min(i, n - 1);
+        left.push(2 * x0 - signal[li]);
+        right.push(2 * xn - signal[n - 1 - ri]);
+    }
+    left.reverse();
+    return left.concat(signal, right);
 }

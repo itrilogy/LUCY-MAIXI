@@ -7,6 +7,7 @@ export interface SignalQuality {
 
 export interface SignalMetrics {
     rate: number;
+    instantRate?: number;
     quality: SignalQuality;
 }
 
@@ -26,12 +27,12 @@ export class SignalAnalyzer {
         heart: {
             min: 36,
             max: 198,
-            default: 75
+            default: 0
         },
         resp: {
             min: 6,
             max: 32,
-            default: 15
+            default: 0
         }
     };
 
@@ -66,14 +67,8 @@ export class SignalAnalyzer {
             const { minFreq, maxFreq } = this.FREQ_RANGES[type];
             const peakFreq = this.findDominantFrequency(fftResult, samplingRate, minFreq, maxFreq);
 
-            // Convert to rate
-            const rate = peakFreq * 60;
-            console.log(`${type}: Calculated rate before validation: ${rate.toFixed(1)}`);
-
-            // Assess signal quality, passing the signal type and sampling rate
-            const quality = this.assessSignalQuality(processedSignal, raw, type, samplingRate);
-
-            // Validate rate
+            const rate = peakFreq > 0 ? peakFreq * 60 : 0;
+            const quality = this.assessSignalQuality(processedSignal, raw, type, samplingRate, peakFreq);
             const validatedRate = this.validateRate(rate, type, quality);
 
             return {
@@ -116,30 +111,19 @@ export class SignalAnalyzer {
 
         // Don't immediately reject respiration rates with poor quality
         // Only use default for very poor signals with near-zero SNR
-        if (quality.quality === 'poor') {
-            // For respiration, be more lenient about using calculated values
-            if (type === 'resp' && quality.snr > -5.0 && rate >= range.min && rate <= range.max) {
-                console.log(`Using respiration rate ${rate.toFixed(1)} despite poor quality (${quality.snr.toFixed(2)} dB)`);
-                return rate;
-            }
-            if (type === 'heart' && quality.snr > -3.0 && rate >= range.min && rate <= range.max) {
-                console.log(`Using heart rate ${rate.toFixed(1)} despite poor quality (${quality.snr.toFixed(2)} dB)`);
-                return rate;
-            }
-
-            console.log(`${type} rate rejected due to poor quality: ${quality.snr.toFixed(2)} dB`);
-            return range.default;
+        if (!isFinite(rate) || rate <= 0) {
+            return 0;
         }
 
-        // Constrain rate within physiological range
-        const constrainedRate = Math.min(Math.max(rate, range.min), range.max);
-
-        // Log if rate was constrained
-        if (constrainedRate !== rate) {
-            console.log(`${type} rate constrained from ${rate.toFixed(1)} to ${constrainedRate.toFixed(1)}`);
+        if (quality.quality === 'poor' && quality.snr < 1) {
+            return 0;
         }
 
-        return constrainedRate;
+        if (rate < range.min || rate > range.max) {
+            return 0;
+        }
+
+        return rate;
     }
 
     /**
@@ -149,75 +133,78 @@ export class SignalAnalyzer {
      * @param type The signal type ('heart' or 'resp')
      * @returns SNR value in decibels
      */
-    private static calculateSNR(raw: number[], type: 'heart' | 'resp', sampleRate: number = 30): number {
-        // Basic validation
+    private static calculateSNR(
+        raw: number[],
+        type: 'heart' | 'resp',
+        sampleRate: number = 30,
+        peakFreq: number = 0
+    ): number {
         if (!raw?.length) {
-            console.warn(`Invalid inputs to SNR calculation for ${type} signal`);
-            return 0.01;
+            return -20;
         }
 
         try {
-            // Get physiological frequency ranges based on passed signal type
             const { minFreq, maxFreq } = this.FREQ_RANGES[type];
-
-            // Apply windowing to reduce spectral leakage
             const windowed = this.applyWindow(raw);
-
-            // Compute FFT
             const fft = this.computeFFT(windowed);
 
-            // Calculate magnitude spectrum
-            const magnitudes = new Array(fft.real.length / 2);
+            const magnitudes = new Array(Math.floor(fft.real.length / 2));
             for (let i = 0; i < magnitudes.length; i++) {
                 magnitudes[i] = Math.sqrt(fft.real[i] * fft.real[i] + fft.imag[i] * fft.imag[i]);
             }
 
-            // Calculate frequency resolution (Hz per bin)
-            // Use the passed sample rate parameter instead of hardcoding
-            const fs = sampleRate;
-            const freqResolution = fs / fft.real.length;
+            const freqResolution = sampleRate / fft.real.length;
+            const bandHalfWidth = type === 'heart' ? 0.2 : 0.05;
+            const peak = peakFreq > 0 ? peakFreq : this.bandPeakFrequency(magnitudes, freqResolution, minFreq, maxFreq);
 
-            // Calculate signal power in the physiological band
-            let signalPower = 0;
-            let totalPower = 0;
+            let peakPower = 0;
+            let bandPower = 0;
 
             for (let i = 0; i < magnitudes.length; i++) {
                 const freq = i * freqResolution;
+                if (freq < minFreq || freq > maxFreq) continue;
                 const power = magnitudes[i] * magnitudes[i];
-
-                // Add to total power
-                totalPower += power;
-
-                // If frequency is in physiological range, add to signal power
-                if (freq >= minFreq && freq <= maxFreq) {
-                    signalPower += power;
+                bandPower += power;
+                if (Math.abs(freq - peak) <= bandHalfWidth || Math.abs(freq - peak * 2) <= bandHalfWidth) {
+                    peakPower += power;
                 }
             }
 
-            // Noise power is everything outside the physiological band
-            const noisePower = Math.max(totalPower - signalPower, 1e-10);
-
-            // Calculate SNR
-            const snrValue = 10 * Math.log10(signalPower / noisePower);
-
-            // Ensure SNR is within reasonable bounds
-            if (!isFinite(snrValue) || snrValue < 0) {
-                console.warn(`Invalid SNR value calculated for ${type}: ${snrValue}`);
-                return type === 'resp' ? 0.5 : 0.01; // Higher min value for resp
-            }
-
-            console.debug(`Frequency-based SNR for ${type}: ${snrValue.toFixed(2)} dB`);
-
-            return snrValue;
-        }
-        catch (error) {
-            console.error(`Error calculating frequency-based SNR for ${type}:`, error);
-            return type === 'resp' ? 0.5 : 0.01; // Higher fallback for resp
+            const noisePower = Math.max(bandPower - peakPower, 1e-12);
+            const snrValue = 10 * Math.log10(Math.max(peakPower, 1e-12) / noisePower);
+            return isFinite(snrValue) ? snrValue : -20;
+        } catch {
+            return -20;
         }
     }
 
-    // Update the assessSignalQuality method to properly calculate SNR
-    private static assessSignalQuality(signal: number[], raw: number[], type: 'heart' | 'resp', sampleRate: number = 30): SignalMetrics['quality'] {
+    private static bandPeakFrequency(
+        magnitudes: number[],
+        freqResolution: number,
+        minFreq: number,
+        maxFreq: number
+    ): number {
+        let best = 0;
+        let bestPower = 0;
+        for (let i = 1; i < magnitudes.length; i++) {
+            const freq = i * freqResolution;
+            if (freq < minFreq || freq > maxFreq) continue;
+            const power = magnitudes[i] * magnitudes[i];
+            if (power > bestPower) {
+                bestPower = power;
+                best = freq;
+            }
+        }
+        return best;
+    }
+
+    private static assessSignalQuality(
+        signal: number[],
+        raw: number[],
+        type: 'heart' | 'resp',
+        sampleRate: number = 30,
+        peakFreq: number = 0
+    ): SignalMetrics['quality'] {
         if (signal.length < 30) {
             return {
                 snr: 0,
@@ -227,7 +214,7 @@ export class SignalAnalyzer {
 
         try {
             // Calculate SNR using the improved method, passing the sample rate
-            const snr = this.calculateSNR(raw, type, sampleRate);
+            const snr = this.calculateSNR(raw, type, sampleRate, peakFreq);
 
             // Determine quality level based on metrics - adjusted for respiration
             let quality: SignalMetrics['quality']['quality'] = 'poor';
@@ -268,9 +255,10 @@ export class SignalAnalyzer {
     }
 
     private static applyWindow(signal: number[]): number[] {
+        if (signal.length < 2) return signal.slice();
         return signal.map((x, i) => {
             const term = 2 * Math.PI * i / (signal.length - 1);
-            const window = 0.54 - 0.46 * Math.cos(term); // Hamming window
+            const window = 0.54 - 0.46 * Math.cos(term);
             return x * window;
         });
     }

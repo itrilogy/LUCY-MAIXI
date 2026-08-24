@@ -1,6 +1,8 @@
-import { ExportData } from '../types';
+import { ExportData, HrvMetrics, RateSessionStats } from '../types';
 import { SignalAnalyzer, SignalMetrics } from './signalAnalysis';
 import { ButterworthFilter } from './butterworthFilter';
+import { computeHrvMetrics } from './hrv';
+import { debugLog, debugWarn } from './logger';
 
 export interface SignalBuffer {
     raw: number[];
@@ -22,8 +24,8 @@ export class SignalProcessor {
     public INITIAL_FRAMES: number;
     public SUBSEQUENT_FRAMES: number;
     public OVERLAP_FRAMES: number;
-    private readonly MIN_SECONDS_FOR_METRICS = 6;
-    private readonly METRICS_WINDOW_SECONDS = 12; // Adjusted for faster response
+    private readonly MIN_SECONDS_FOR_METRICS: number;
+    private readonly METRICS_WINDOW_SECONDS: number;
 
     // Flag to track if we've reached the minimum data threshold
     private hasReachedMinimumData: boolean = false;
@@ -70,12 +72,16 @@ export class SignalProcessor {
     constructor(
         fps: number = 30,
         initialFrames: number = 181,
-        subsequentFrames: number = 121
+        subsequentFrames: number = 121,
+        minSecondsForMetrics: number = 12,
+        metricsWindowSeconds: number = 30
     ) {
         this.fps = fps;
         this.INITIAL_FRAMES = initialFrames;
         this.SUBSEQUENT_FRAMES = subsequentFrames;
         this.OVERLAP_FRAMES = Math.max(0, initialFrames - subsequentFrames);
+        this.MIN_SECONDS_FOR_METRICS = minSecondsForMetrics;
+        this.METRICS_WINDOW_SECONDS = metricsWindowSeconds;
 
         // Set appropriate moving average window sizes based on sampling rate
         this.BVP_MA_WINDOW = Math.round(0.35 * fps); // 350 ms for heart rate
@@ -110,14 +116,11 @@ export class SignalProcessor {
      */
     public setInferenceTime(timeMs: number): void {
         this._lastInferenceTime = timeMs;
-        console.log(`[SignalProcessor] Inference time: ${timeMs.toFixed(2)} ms`);
+        debugLog('SignalProcessor', `Inference time: ${timeMs.toFixed(2)} ms`);
     }
 
     public startCapture(): void {
-        console.log('[SignalProcessor] Starting capture with clean state');
-        // Reset all state for a new capture
-        // this.reset();
-        // Start capturing signals
+        debugLog('SignalProcessor', 'Starting capture');
         this.isCapturing = true;
         // Initialize session timestamp
         this.sessionStartTime = Date.now();
@@ -147,7 +150,8 @@ export class SignalProcessor {
             resp: number[],
             filteredBvp: number[],
             filteredResp: number[]
-        }
+        },
+        hrv?: HrvMetrics | null
     } {
         const emptyMetrics = {
             rate: 0,
@@ -167,7 +171,8 @@ export class SignalProcessor {
                 resp: [],
                 filteredBvp: [],
                 filteredResp: []
-            }
+            },
+            hrv: null
         };
     }
 
@@ -175,7 +180,12 @@ export class SignalProcessor {
      * Process new BVP and respiratory signals according to the buffer management strategy
      * Optimized to work without stored filtered signal buffers
      */
-    processNewSignals(bvpSignal: number[], respSignal: number[], timestamp: string): {
+    processNewSignals(
+        bvpSignal: number[],
+        respSignal: number[],
+        timestamp: string,
+        options: { hasResp?: boolean; computeHrv?: boolean } = {}
+    ): {
         bvp: SignalMetrics,
         resp: SignalMetrics,
         displayData: {
@@ -183,11 +193,13 @@ export class SignalProcessor {
             resp: number[],
             filteredBvp: number[],
             filteredResp: number[]
-        }
+        },
+        hrv?: HrvMetrics | null,
+        sessionStats?: { heart: RateSessionStats; resp: RateSessionStats }
     } {
-        // Exit early if not capturing
+        const hasResp = options.hasResp !== false;
         if (!this.isCapturing) {
-            console.log('[SignalProcessor] Skipping signal processing because capture is inactive');
+            debugLog('SignalProcessor', 'Skipping because capture is inactive');
             return this.getEmptyResults();
         }
 
@@ -202,27 +214,16 @@ export class SignalProcessor {
         if (!this.isInitialProcessingDone) {
             // Initial processing - add all samples
             this.updateBuffer(this.bvpBuffer, bvpSignal, 'heart');
-            this.updateBuffer(this.respBuffer, respSignal, 'resp');
-
-            // Mark that initial processing is done
+            if (hasResp) this.updateBuffer(this.respBuffer, respSignal, 'resp');
             this.isInitialProcessingDone = true;
-
-            console.log(`Initial BVP segment: length=${bvpSignal.length}, min=${Math.min(...bvpSignal)}, max=${Math.max(...bvpSignal)}`);
-            console.log(`Initial RESP segment: length=${respSignal.length}, min=${Math.min(...respSignal)}, max=${Math.max(...respSignal)}`);
+            debugLog('SignalProcessor', `Initial BVP segment length=${bvpSignal.length}`);
         } else {
-            // Subsequent processing - handle overlap
-            const overlapBvpSamples = bvpSignal.slice(0, this.OVERLAP_FRAMES);
-            const overlapRespSamples = respSignal.slice(0, this.OVERLAP_FRAMES);
-
-            // Add new samples after overlap
             const newBvpSamples = bvpSignal.slice(this.OVERLAP_FRAMES);
-            const newRespSamples = respSignal.slice(this.OVERLAP_FRAMES);
-
-            // Update buffers with ONLY new samples to prevent signal duplication/time stretching
             this.updateBuffer(this.bvpBuffer, newBvpSamples, 'heart');
-            this.updateBuffer(this.respBuffer, newRespSamples, 'resp');
-
-            console.log(`Subsequent segment sizes - New BVP added: ${newBvpSamples.length}, New RESP added: ${newRespSamples.length}`);
+            if (hasResp) {
+                const newRespSamples = respSignal.slice(this.OVERLAP_FRAMES);
+                this.updateBuffer(this.respBuffer, newRespSamples, 'resp');
+            }
         }
 
         // Store timestamps for export
@@ -236,7 +237,7 @@ export class SignalProcessor {
         if (!this.hasReachedMinimumData) {
             const hasMinimumData =
                 this.bvpBuffer.raw.length >= this.fps * this.MIN_SECONDS_FOR_METRICS &&
-                this.respBuffer.raw.length >= this.fps * this.MIN_SECONDS_FOR_METRICS;
+                (!hasResp || this.respBuffer.raw.length >= this.fps * this.MIN_SECONDS_FOR_METRICS);
 
             if (hasMinimumData) {
                 this.hasReachedMinimumData = true;
@@ -268,33 +269,51 @@ export class SignalProcessor {
                 this.respBuffer.raw.length
             );
 
-            console.log(`[SignalProcessor] Processing with sliding window - BVP: ${bvpWindowSamples} samples, RESP: ${respWindowSamples} samples`);
-
-            // Process signals for metrics using the sliding window
             bvpMetrics = this.processSignal(this.bvpBuffer, 'bvp', timestamp, bvpWindowSamples);
-            respMetrics = this.processSignal(this.respBuffer, 'resp', timestamp, respWindowSamples);
-
-            // Update display rates - happens every time after minimum threshold is reached
+            if (hasResp) {
+                respMetrics = this.processSignal(this.respBuffer, 'resp', timestamp, respWindowSamples);
+            }
             this.updateDisplayRates();
-
-            console.log(`[SignalProcessor] Metrics computed - Heart: ${bvpMetrics.rate.toFixed(1)} bpm, Resp: ${respMetrics.rate.toFixed(1)} brpm`);
-        } else {
-            console.log(`[SignalProcessor] Insufficient data for metrics: BVP=${this.bvpBuffer.raw.length}/${this.fps * this.MIN_SECONDS_FOR_METRICS}, RESP=${this.respBuffer.raw.length}/${this.fps * this.MIN_SECONDS_FOR_METRICS}`);
         }
 
         // Prepare display data - available from first inference
         const displayData = this.prepareDisplayData();
+        const hrv = options.computeHrv
+            ? computeHrvMetrics(displayData.filteredBvp, this.fps)
+            : undefined;
 
         return {
             bvp: {
                 ...bvpMetrics,
+                instantRate: bvpMetrics.rate,
                 rate: this.displayHeartRate > 0 ? this.displayHeartRate : bvpMetrics.rate
             },
             resp: {
                 ...respMetrics,
+                instantRate: respMetrics.rate,
                 rate: this.displayRespRate > 0 ? this.displayRespRate : respMetrics.rate
             },
-            displayData
+            displayData,
+            hrv,
+            sessionStats: {
+                heart: this.summarizeRates(this.bvpBuffer.rates),
+                resp: this.summarizeRates(this.respBuffer.rates)
+            }
+        };
+    }
+
+    private summarizeRates(points: RatePoint[]): RateSessionStats {
+        const values = points
+            .map(point => point.value)
+            .filter(value => value > 0 && isFinite(value));
+        if (values.length === 0) {
+            return { avg: 0, min: 0, max: 0, count: 0 };
+        }
+        return {
+            avg: values.reduce((sum, value) => sum + value, 0) / values.length,
+            min: Math.min(...values),
+            max: Math.max(...values),
+            count: values.length
         };
     }
 
@@ -314,7 +333,6 @@ export class SignalProcessor {
                 const sorted = [...validRates].sort((a, b) => a - b);
                 // Use median for stable rate reporting
                 this.displayHeartRate = sorted[Math.floor(sorted.length / 2)];
-                console.log(`[SignalProcessor] Updated heart rate to ${this.displayHeartRate} (median of ${validRates.length} values)`);
             } else {
                 this.displayHeartRate = 0;
             }
@@ -329,7 +347,6 @@ export class SignalProcessor {
             if (validRates.length > 0) {
                 const sorted = [...validRates].sort((a, b) => a - b);
                 this.displayRespRate = sorted[Math.floor(sorted.length / 2)];
-                console.log(`[SignalProcessor] Updated respiratory rate to ${this.displayRespRate} (median of ${validRates.length} values)`);
             } else {
                 this.displayRespRate = 0;
             }
@@ -456,9 +473,6 @@ export class SignalProcessor {
             // Get the sliding window - always use the most recent windowSamples
             const rawWindow = buffer.raw.slice(-windowSamples);
 
-            console.log(`[SignalProcessor] Processing ${type} signal with ${rawWindow.length} samples (requested: ${windowSamples})`);
-
-            // Generate filtered data on-demand instead of accessing stored filtered data
             const signalType = type === 'bvp' ? 'heart' : 'resp';
             const analysisWindow = this.processSegment(rawWindow, signalType);
 
@@ -484,27 +498,19 @@ export class SignalProcessor {
             // This ensures continuous updates after the initial threshold
             if (metrics.rate > 0 && isFinite(metrics.rate) && isPhysiologicallyValid) {
                 if (type === 'bvp') {
-                    console.log(`[SignalProcessor] Adding heart rate to history: ${metrics.rate.toFixed(1)} bpm`);
                     this.bvpRateHistory.push(metrics.rate);
                     if (this.bvpRateHistory.length > this.RATE_HISTORY_MAX_SIZE) {
                         this.bvpRateHistory.shift();
                     }
                 } else {
-                    console.log(`[SignalProcessor] Adding respiratory rate to history: ${metrics.rate.toFixed(1)} brpm`);
                     this.respRateHistory.push(metrics.rate);
                     if (this.respRateHistory.length > this.RATE_HISTORY_MAX_SIZE) {
                         this.respRateHistory.shift();
                     }
                 }
             } else {
-                console.warn(`[SignalProcessor] Rejecting ${type} rate ${metrics.rate.toFixed(1)} - outside physiological range`);
-            }
-
-            // Validate SNR values
-            if (metrics.quality.snr <= 0) {
-                console.warn(`[SignalProcessor] Warning: Invalid SNR value (${metrics.quality.snr}) for ${type} signal`);
-                metrics.quality.snr = 0.01;
-                metrics.quality.quality = 'poor';
+                metrics.rate = 0;
+                debugWarn('SignalProcessor', `Rejected ${type} rate ${metrics.rate}`);
             }
 
             // Store rate in buffer for export with the current quality metrics
@@ -637,6 +643,7 @@ export class SignalProcessor {
         this.BVP_Mean = 0;
         this.RESP_Mean = 0;
         this._lastInferenceTime = 0;
+        this.isCapturing = false;
 
         // Reset the minimum data threshold flag
         this.hasReachedMinimumData = false;

@@ -48,6 +48,15 @@ export interface StatusMessageProps {
 }
 
 // Vital Signs Interface
+export interface HrvMetrics {
+    sdnn: number;
+    rmssd: number;
+    sd1: number;
+    sd2: number;
+    meanIbiMs: number;
+    peakCount: number;
+}
+
 export interface VitalSigns {
     heartRate: number;
     respRate: number;
@@ -60,6 +69,7 @@ export interface VitalSigns {
     bvpQuality: 'excellent' | 'good' | 'moderate' | 'poor';
     respQuality: 'excellent' | 'good' | 'moderate' | 'poor';
     actionUnits?: number[];
+    hrv?: HrvMetrics | null;
 }
 
 export interface ControlsProps {
@@ -80,10 +90,18 @@ export type StatusMessage = {
 // Signal Metrics
 export interface SignalMetrics {
     rate: number;
+    instantRate?: number;
     quality: {
         snr: number;
         quality: 'excellent' | 'good' | 'moderate' | 'poor';
     };
+}
+
+export interface RateSessionStats {
+    avg: number;
+    min: number;
+    max: number;
+    count: number;
 }
 
 export interface SignalBuffers {
@@ -98,6 +116,11 @@ export interface SignalBuffers {
         metrics: SignalMetrics;
     };
     actionUnits?: number[];
+    hrv?: HrvMetrics | null;
+    sessionStats?: {
+        heart: RateSessionStats;
+        resp: RateSessionStats;
+    };
     timestamp: string;
 }
 
@@ -149,13 +172,19 @@ export interface InferenceResult {
         filtered: number[];
         metrics: SignalMetrics;
     };
-    actionUnits?: number[]; // Added for BigSmall multitask model
+    actionUnits?: number[];
+    hrv?: HrvMetrics | null;
     timestamp: string;
     performanceMetrics: PerformanceMetrics;
+    sessionStats?: {
+        heart: RateSessionStats;
+        resp: RateSessionStats;
+    };
 }
 
-// Scene Configuration Types
 export type SceneType = 'lite' | 'balanced' | 'pro' | 'expert';
+export type SceneTask = 'bvp' | 'resp' | 'au' | 'hrv';
+export type PreprocessType = 'scale255' | 'tscan' | 'bigsmall' | 'physformer';
 
 export interface SceneConfig {
     id: SceneType;
@@ -168,13 +197,42 @@ export interface SceneConfig {
     icon: string;
     recommendedFPS: number;
     chunkLength: number;
+    frameWidth: number;
+    frameHeight: number;
+    tasks: SceneTask[];
+    preprocess: PreprocessType;
+    modelType: string;
+    minSecondsForMetrics: number;
+    metricsWindowSeconds: number;
+    subsequentRatio: number;
 }
 
-// Worker Message Type
+export type WorkerRequestType =
+    | 'init'
+    | 'startCapture'
+    | 'stopCapture'
+    | 'reset'
+    | 'inferenceResult'
+    | 'exportData'
+    | 'dispose';
+
+export interface WorkerInitConfig {
+    modelPath: string;
+    configPath: string;
+    initialFrames: number;
+    subsequentFrames: number;
+    minSecondsForMetrics: number;
+    metricsWindowSeconds: number;
+    preprocess: PreprocessType;
+    modelType: string;
+    tasks: SceneTask[];
+    initGeneration?: number;
+}
+
 export interface WorkerMessage {
     type: string;
     status: 'success' | 'error';
-    results?: any;
+    results?: unknown;
     error?: string;
     data?: string;
 }
@@ -186,7 +244,7 @@ export interface FilterCoefficients {
 
 export interface ModelConfig {
     sampling_rate: number;
-    input_size: any; // Can be number[] or object for multi-input
+    input_size: number[] | Record<string, number[]>; // Can be number[] or object for multi-input
     output_names: string[];
     modelType?: string; // e.g., 'Balanced', 'TSCAN', 'PhysFormer', 'BigSmall'
 }

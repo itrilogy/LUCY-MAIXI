@@ -13,8 +13,8 @@ export class VideoProcessor {
     private frameWidth: number = 72;  // Default, will be updated from config
     private frameHeight: number = 72; // Default, will be updated from config
     private frameBuffer: ImageData[] = [];
-    private MIN_FRAMES_REQUIRED = 181; // Will be updated from config if available
-    private readonly MAX_BUFFER_SIZE = 181;     // 181 frame for Diff
+    private MIN_FRAMES_REQUIRED = 181;
+    private MAX_BUFFER_SIZE = 181;
     private mediaStream: MediaStream | null = null;
     private lastFrameTime: number = 0;
     private frameCount: number = 0;
@@ -59,7 +59,7 @@ export class VideoProcessor {
             alpha: false,
             desynchronized: true
         });
-        let processCtx = this.processingCanvas.getContext('2d', {
+        const processCtx = this.processingCanvas.getContext('2d', {
             willReadFrequently: true,
             alpha: false,
             desynchronized: true
@@ -176,8 +176,8 @@ export class VideoProcessor {
         // Set new video source with explicit properties
         this.videoElement.src = videoURL;
         this.videoElement.muted = true;
-        this.videoElement.playbackRate = 2.0; // Fast playback for video files
-        this.videoElement.loop = false;      // Ensure no looping
+        this.videoElement.playbackRate = 1.0;
+        this.videoElement.loop = false;
 
         console.log('[VideoProcessor] Video file loaded, isVideoFileSource=true');
 
@@ -223,7 +223,8 @@ export class VideoProcessor {
 
                         console.log('[VideoProcessor] Reinitializing face detector...');
                         await this.faceDetector.initialize();
-                        this.faceDetector.setCapturingState(true); // Ensure capturing state is set
+                        this.faceDetector.setCapturingState(true);
+                        this.faceDetector.startDetection();
 
                         // Load configuration settings
                         await this.loadConfigSettings();
@@ -314,7 +315,8 @@ export class VideoProcessor {
             }
             console.log('Reinitializing face detector...');
             await this.faceDetector.initialize();
-            this.faceDetector.setCapturingState(true); // Ensure capturing state is set
+            this.faceDetector.setCapturingState(true);
+            this.faceDetector.startDetection();
 
 
             // Get media stream as before
@@ -426,12 +428,36 @@ export class VideoProcessor {
         detectFaces();
     }
 
+    public applySceneSpec(spec: { frameWidth: number; frameHeight: number; sequenceLength: number }): void {
+        this.frameWidth = spec.frameWidth;
+        this.frameHeight = spec.frameHeight;
+        this.MIN_FRAMES_REQUIRED = spec.sequenceLength;
+        this.MAX_BUFFER_SIZE = spec.sequenceLength;
+
+        const newProcessingCanvas = this.createOptimizedCanvas(this.frameWidth, this.frameHeight);
+        const newCtx = newProcessingCanvas.getContext('2d', {
+            willReadFrequently: true,
+            alpha: false,
+            desynchronized: true
+        });
+        if (!newCtx) {
+            throw new Error('Failed to get processing canvas context');
+        }
+        this.processingCanvas = newProcessingCanvas;
+        this.processingCtx = newCtx;
+        this.setupContexts();
+        this.configLoaded = true;
+    }
+
     private async loadConfigSettings(): Promise<void> {
         try {
-            // Get frame dimensions from config
+            if (this.configLoaded && this.frameWidth > 0) {
+                return;
+            }
             this.frameWidth = await configService.getFrameWidth();
             this.frameHeight = await configService.getFrameHeight();
             this.MIN_FRAMES_REQUIRED = await configService.getSequenceLength();
+            this.MAX_BUFFER_SIZE = this.MIN_FRAMES_REQUIRED;
 
             console.log(`[VideoProcessor] Using frame dimensions: ${this.frameWidth}x${this.frameHeight}`);
             console.log(`[VideoProcessor] Using sequence length: ${this.MIN_FRAMES_REQUIRED}`);
@@ -471,8 +497,10 @@ export class VideoProcessor {
         const newCenterX = newFaceBox.x + newFaceBox.width / 2;
         const newCenterY = newFaceBox.y + newFaceBox.height / 2;
 
-        const distanceX = Math.abs(newCenterX - oldCenterX) / this.frameWidth;
-        const distanceY = Math.abs(newCenterY - oldCenterY) / this.frameHeight;
+        const normW = this.videoElement.videoWidth || this.frameWidth;
+        const normH = this.videoElement.videoHeight || this.frameHeight;
+        const distanceX = Math.abs(newCenterX - oldCenterX) / normW;
+        const distanceY = Math.abs(newCenterY - oldCenterY) / normH;
         const distance = Math.sqrt(distanceX * distanceX + distanceY * distanceY);
 
         // Only update if movement is significant
@@ -607,10 +635,7 @@ export class VideoProcessor {
 
         // Initial video playback setup for file source
         if (this._isVideoFileSource) {
-            // Start with a high playback rate for maximum processing speed
-            this.videoElement.playbackRate = 2.0;
-            console.log('[VideoProcessor] Setting initial video playback rate to 2.0 for maximum throughput');
-
+            this.videoElement.playbackRate = 1.0;
             this.videoElement.play().catch(error => {
                 console.error('[VideoProcessor] Failed to play video:', error);
             });
@@ -628,46 +653,18 @@ export class VideoProcessor {
                 return;
             }
 
-            // For video files, use simpler playback rate management
-            if (timestamp - lastAdjustmentTime > ADJUSTMENT_INTERVAL) {
+            if (this._isVideoFileSource && timestamp - lastAdjustmentTime > ADJUSTMENT_INTERVAL) {
                 lastAdjustmentTime = timestamp;
-
-                // Adaptive playback control based on backlog
+                this.videoElement.playbackRate = 1.0;
                 if (frameBacklog > 30) {
-                    // Severe backlog - pause briefly to let processing catch up
                     this.videoElement.pause();
-                    await new Promise(r => setTimeout(r, 100));
-                    this.videoElement.play().catch(e => console.error(e));
+                    await new Promise(r => setTimeout(r, 80));
+                    this.videoElement.play().catch(() => undefined);
                     frameBacklog = Math.max(0, frameBacklog - 10);
-                    console.log('[VideoProcessor] Severe backlog - paused playback briefly');
-                }
-                else if (frameBacklog > 20) {
-                    // Significant backlog - reduce playback rate but still keep it relatively high
-                    this.videoElement.playbackRate = 1.0;
-                    console.log('[VideoProcessor] Reducing playback rate to 1.0 due to significant backlog');
-                }
-                else if (frameBacklog > 10) {
-                    // Moderate backlog - slightly reduce speed
-                    this.videoElement.playbackRate = 1.5;
-                    console.log('[VideoProcessor] Setting playback rate to 1.5 (moderate backlog)');
-                }
-                else {
-                    // No significant backlog - run as fast as possible
-                    this.videoElement.playbackRate = 2.0;
-
-                    // If backlog is very low, try going even faster
-                    if (frameBacklog < 5) {
-                        this.videoElement.playbackRate = 3.0;
-                        console.log('[VideoProcessor] Setting playback rate to 3.0 (minimal backlog)');
-                    } else {
-                        console.log('[VideoProcessor] Setting playback rate to 2.0 (normal operation)');
-                    }
                 }
             }
 
-            // Determine if we should process this frame
-            const shouldProcessFrame = this._isVideoFileSource ||
-                (timestamp - this.lastFrameTime >= this.frameInterval);
+            const shouldProcessFrame = timestamp - this.lastFrameTime >= this.frameInterval;
 
             if (shouldProcessFrame) {
                 // Process the frame
@@ -771,8 +768,6 @@ export class VideoProcessor {
             const cropRegion = this.getCropRegion();
 
             // Optimize canvas operations path based on requirements
-            let frameData;
-
             if (needsCroppedCanvas) {
                 // Path 1: We need the cropped canvas for display or face detection
                 // Draw cropped region to intermediate canvas
@@ -822,7 +817,7 @@ export class VideoProcessor {
             }
 
             // Get processed frame data - only do this once
-            frameData = this.processingCtx.getImageData(
+            const frameData = this.processingCtx.getImageData(
                 0,
                 0,
                 this.frameWidth,

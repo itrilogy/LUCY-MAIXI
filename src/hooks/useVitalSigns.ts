@@ -1,13 +1,7 @@
-// src/hooks/useVitalSigns.ts
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { VitalSigns } from '@/types';
 
-interface UseVitalSignsProps {
-    isCapturing: boolean;
-    onError: (error: Error) => void;
-}
-
-export const useVitalSigns = ({ isCapturing, onError }: UseVitalSignsProps) => {
+export const useVitalSigns = () => {
     const [vitalSigns, setVitalSigns] = useState<VitalSigns>({
         heartRate: 0,
         respRate: 0,
@@ -18,7 +12,9 @@ export const useVitalSigns = ({ isCapturing, onError }: UseVitalSignsProps) => {
         filteredBvpSignal: [],
         filteredRespSignal: [],
         bvpQuality: 'poor',
-        respQuality: 'poor'
+        respQuality: 'poor',
+        actionUnits: undefined,
+        hrv: null
     });
 
     const [performance, setPerformance] = useState({
@@ -55,7 +51,9 @@ export const useVitalSigns = ({ isCapturing, onError }: UseVitalSignsProps) => {
             filteredBvpSignal: [],
             filteredRespSignal: [],
             bvpQuality: 'poor',
-            respQuality: 'poor'
+            respQuality: 'poor',
+            actionUnits: undefined,
+            hrv: null
         });
         setPerformance({
             averageUpdateTime: 0,

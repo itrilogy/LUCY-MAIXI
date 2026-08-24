@@ -1,291 +1,256 @@
-// src/App.tsx
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { VideoDisplay, Controls, VitalSignsChart } from '@/components';
+import { VideoDisplay, Controls } from '@/components';
 import ReportView from '@/components/Report/ReportView';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 import { useDeviceCapabilities } from '@/hooks/useDeviceCapabilities';
 import { useVitalSigns } from '@/hooks/useVitalSigns';
-import { VideoProcessor } from '@/utils/videoProcessor';
+import { useInferenceWorker } from '@/hooks/useInferenceWorker';
+import { useFrameScheduler } from '@/hooks/useFrameScheduler';
+import { useCaptureSession } from '@/hooks/useCaptureSession';
 import {
     StatusMessage as StatusMessageType,
-    VitalSigns as VitalSignsType,
     InferenceResult as InferenceResultType,
     ExportData as ExportDataType,
     SceneConfig,
     SceneType
 } from '@/types';
+import { SCENES, DEFAULT_SCENE, sceneHasTask } from '@/config/scenes';
 import { SceneSelector } from '@/components';
 import MainDashboard from '@/components/Dashboard/MainDashboard';
 import GlobalMetricsRow from '@/components/Dashboard/GlobalMetricsRow';
-import { Activity, Zap, Layers } from 'lucide-react';
+import { Zap } from 'lucide-react';
 import AboutModal from '@/components/AboutModal/AboutModal';
 
-const SCENES: SceneConfig[] = [
-    {
-        id: 'lite',
-        name: '基础快速检测',
-        description: '基于 TS-CAN 极轻量化架构，快速响应，适合所有设备基础性能预览。',
-        modelPath: '/models/tscan/model.onnx',
-        configPath: '/models/tscan/config.json',
-        shortModelName: 'TS-CAN',
-        features: ['心率数值', '低延迟响应'],
-        icon: '⚡',
-        recommendedFPS: 30,
-        chunkLength: 20
-    },
-    {
-        id: 'balanced',
-        name: '标准健康监测',
-        description: '基于 SCAMPS MMRPhys 主力模型，临床级精度对齐，支持 BVP 与呼吸双任务监测。',
-        modelPath: '/models/rphys/SCAMPS_Multi_72x72.onnx',
-        configPath: '/models/rphys/config.json',
-        shortModelName: 'SCAMPS',
-        features: ['心率', '呼吸率', '高稳波形'],
-        icon: '⚖️',
-        recommendedFPS: 30,
-        chunkLength: 181
-    },
-    {
-        id: 'pro',
-        name: '驾驶/疲劳监测',
-        description: '多任务 BigSmall 卷积架构，同步实时分析生理指标与 12 类面部关键动作单元。',
-        modelPath: '/models/bigsmall/model.onnx',
-        configPath: '/models/bigsmall/config.json',
-        shortModelName: 'BigSmall',
-        features: ['心率', '面部 AUs', '疲劳/焦虑预警'],
-        icon: '🚗',
-        recommendedFPS: 30,
-        chunkLength: 3
-    },
-    {
-        id: 'expert',
-        name: '科研高精分析',
-        description: '基于 PhysFormer Transformer 架构，捕捉亚像素级微色差，深度解算 HRV 数据。',
-        modelPath: '/models/physformer/model.onnx',
-        configPath: '/models/physformer/config.json',
-        shortModelName: 'PhysFormer',
-        features: ['极致 BVP', 'HRV 深度指标', '散点图分析'],
-        icon: '🧬',
-        recommendedFPS: 30,
-        chunkLength: 160
-    }
-];
+const emptyCumulative = () => ({
+    heartRateSum: 0,
+    heartRateCount: 0,
+    heartRateMin: Infinity,
+    heartRateMax: -Infinity,
+    respRateSum: 0,
+    respRateCount: 0,
+    respRateMin: Infinity,
+    respRateMax: -Infinity
+});
 
 const App: React.FC = () => {
-    const [isInitialized, setIsInitialized] = useState(false);
     const [isCapturing, setIsCapturing] = useState(false);
-    const [bufferProgress, setBufferProgress] = useState(0);
-    const [exporting, setExporting] = useState(false);
     const [statusMessage, setStatusMessage] = useState<StatusMessageType>({
         message: '正在初始化系统...',
         type: 'info'
     });
     const [reportData, setReportData] = useState<ExportDataType | null>(null);
-    const [selectedScene, setSelectedScene] = useState<SceneConfig>(SCENES[0]);
+    const [selectedScene, setSelectedScene] = useState<SceneConfig>(DEFAULT_SCENE);
     const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
+    const [processorEpoch, setProcessorEpoch] = useState(0);
 
     const { capabilities, isChecking } = useDeviceCapabilities();
-    const frameCollectionRef = useRef<{
-        frames: ImageData[];
-        initialCollectionComplete: boolean;
-        framesSinceLastInference: number;
-    }>({
-        frames: [],
-        initialCollectionComplete: false,
-        framesSinceLastInference: 0
-    });
+    const { vitalSigns, updateVitalSigns, updatePerformance, resetData } = useVitalSigns();
+    const capture = useCaptureSession();
+    const selectedSceneRef = useRef(selectedScene);
+    selectedSceneRef.current = selectedScene;
+    const isCapturingRef = useRef(false);
+    const cumulativeMetricsRef = useRef(emptyCumulative());
 
-    const cumulativeMetricsRef = useRef({
-        heartRateSum: 0,
-        heartRateCount: 0,
-        heartRateMin: Infinity,
-        heartRateMax: -Infinity,
-        respRateSum: 0,
-        respRateCount: 0,
-        respRateMin: Infinity,
-        respRateMax: -Infinity
-    });
-
-    const INITIAL_FRAMES = selectedScene.chunkLength;
-    const SUBSEQUENT_FRAMES = Math.floor(selectedScene.chunkLength * 0.66);
-    const OVERLAP_FRAMES = INITIAL_FRAMES - SUBSEQUENT_FRAMES;
-
-    const {
-        vitalSigns,
-        performance,
-        updateVitalSigns,
-        updatePerformance,
-        resetData
-    } = useVitalSigns({
-        isCapturing,
-        onError: (error) => {
-            setStatusMessage({
-                message: `生理统计异常: ${error.message}`,
-                type: 'error'
-            });
-        }
-    });
-
-    const videoProcessorRef = useRef<VideoProcessor | null>(null);
-    const inferenceWorkerRef = useRef<Worker | null>(null);
-    const progressIntervalRef = useRef<number | null>(null);
-
-    // Initialization logic...
-    useEffect(() => {
-        const initializeSystem = async () => {
-            try {
-                if (!capabilities?.isCompatible) return;
-                videoProcessorRef.current = new VideoProcessor();
-
-                videoProcessorRef.current.faceDetector.setOnDetectionStoppedCallback(async () => {
-                    if (videoProcessorRef.current) await videoProcessorRef.current.stopCapture();
-                    if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
-                    setIsCapturing(false);
-                    setBufferProgress(0);
-                    resetData();
-                    cumulativeMetricsRef.current = {
-                        heartRateSum: 0, heartRateCount: 0, heartRateMin: Infinity, heartRateMax: -Infinity,
-                        respRateSum: 0, respRateCount: 0, respRateMin: Infinity, respRateMax: -Infinity
-                    };
-                    setStatusMessage({ message: '未检测到人脸。请重新开始采集。', type: 'warning' });
-                });
-
-                const worker = new Worker(new URL('./workers/inferenceWorker.ts', import.meta.url), { type: 'module' });
-                worker.onmessage = (e) => {
-                    if (e.data.type === 'init') {
-                        if (e.data.status === 'success') {
-                            setIsInitialized(true);
-                            setStatusMessage({ message: '系统就绪', type: 'success' });
-                        } else {
-                            setStatusMessage({ message: `推理模块初始化失败: ${e.data.error}`, type: 'error' });
-                        }
-                    } else if (e.data.type === 'inferenceResult') {
-                        handleInferenceResults(e);
-                    } else if (e.data.type === 'error') {
-                        setStatusMessage({ message: `后台服务错误: ${e.data.error}`, type: 'error' });
-                    }
-                };
-                inferenceWorkerRef.current = worker;
-                worker.postMessage({ type: 'init', config: { modelPath: selectedScene.modelPath, configPath: selectedScene.configPath } });
-            } catch (error) {
-                setStatusMessage({ message: `初始化失败: ${error instanceof Error ? error.message : '未知错误'}`, type: 'error' });
-            }
-        };
-        if (!isChecking && capabilities) initializeSystem();
-        return () => {
-            inferenceWorkerRef.current?.terminate();
-            videoProcessorRef.current?.stopCapture();
-            if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
-        };
-    }, [capabilities, isChecking]);
-
-    const handleInferenceResults = (event: MessageEvent) => {
-        if (event.data.status === 'success') {
-            const res: InferenceResultType = event.data;
-            if (res.bvp?.filtered?.length > 0) setBufferProgress(100);
-            if (res.bvp.metrics.rate > 0) {
-                cumulativeMetricsRef.current.heartRateSum += res.bvp.metrics.rate;
+    const handleInferenceResults = useCallback((res: InferenceResultType) => {
+        if (!isCapturingRef.current) return;
+        const heartInstant = res.bvp?.metrics.instantRate ?? 0;
+        const respInstant = res.resp?.metrics.instantRate ?? 0;
+        if (res.sessionStats?.heart.count) {
+            cumulativeMetricsRef.current = {
+                heartRateSum: res.sessionStats.heart.avg * res.sessionStats.heart.count,
+                heartRateCount: res.sessionStats.heart.count,
+                heartRateMin: res.sessionStats.heart.min,
+                heartRateMax: res.sessionStats.heart.max,
+                respRateSum: res.sessionStats.resp.avg * res.sessionStats.resp.count,
+                respRateCount: res.sessionStats.resp.count,
+                respRateMin: res.sessionStats.resp.min || Infinity,
+                respRateMax: res.sessionStats.resp.max || -Infinity
+            };
+        } else {
+            if (heartInstant > 0) {
+                cumulativeMetricsRef.current.heartRateSum += heartInstant;
                 cumulativeMetricsRef.current.heartRateCount += 1;
-                cumulativeMetricsRef.current.heartRateMin = Math.min(cumulativeMetricsRef.current.heartRateMin, res.bvp.metrics.rate);
-                cumulativeMetricsRef.current.heartRateMax = Math.max(cumulativeMetricsRef.current.heartRateMax, res.bvp.metrics.rate);
+                cumulativeMetricsRef.current.heartRateMin = Math.min(
+                    cumulativeMetricsRef.current.heartRateMin,
+                    heartInstant
+                );
+                cumulativeMetricsRef.current.heartRateMax = Math.max(
+                    cumulativeMetricsRef.current.heartRateMax,
+                    heartInstant
+                );
             }
-            updateVitalSigns({
-                heartRate: res.bvp.metrics.rate, respRate: res.resp.metrics.rate,
-                bvpSignal: res.bvp.raw, respSignal: res.resp.raw,
-                filteredBvpSignal: res.bvp.filtered, filteredRespSignal: res.resp.filtered,
-                bvpSNR: res.bvp.metrics.quality.snr, respSNR: res.resp.metrics.quality.snr,
-                bvpQuality: res.bvp.metrics.quality.quality, respQuality: res.resp.metrics.quality.quality,
-                actionUnits: res.actionUnits,
-            });
-            if (event.data.performanceMetrics) updatePerformance(event.data.performanceMetrics);
+            if (respInstant > 0) {
+                cumulativeMetricsRef.current.respRateSum += respInstant;
+                cumulativeMetricsRef.current.respRateCount += 1;
+                cumulativeMetricsRef.current.respRateMin = Math.min(
+                    cumulativeMetricsRef.current.respRateMin,
+                    respInstant
+                );
+                cumulativeMetricsRef.current.respRateMax = Math.max(
+                    cumulativeMetricsRef.current.respRateMax,
+                    respInstant
+                );
+            }
         }
-    };
+        updateVitalSigns({
+            heartRate: res.bvp.metrics.rate,
+            respRate: res.resp?.metrics.rate ?? 0,
+            bvpSignal: res.bvp.raw,
+            respSignal: res.resp?.raw ?? [],
+            filteredBvpSignal: res.bvp.filtered,
+            filteredRespSignal: res.resp?.filtered ?? [],
+            bvpSNR: res.bvp.metrics.quality.snr,
+            respSNR: res.resp?.metrics.quality.snr ?? 0,
+            bvpQuality: res.bvp.metrics.quality.quality,
+            respQuality: res.resp?.metrics.quality.quality ?? 'poor',
+            actionUnits: res.actionUnits,
+            hrv: res.hrv ?? null
+        });
+        if (res.performanceMetrics) updatePerformance(res.performanceMetrics);
+    }, [updateVitalSigns, updatePerformance]);
 
-    const startMonitoring = useCallback(() => {
-        if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
-        if (!inferenceWorkerRef.current || !videoProcessorRef.current) return;
-        frameCollectionRef.current = { frames: [], initialCollectionComplete: false, framesSinceLastInference: 0 };
-        progressIntervalRef.current = window.setInterval(() => {
-            const isCapturingNow = videoProcessorRef.current?.isCapturing() || false;
-            if (!isCapturingNow || !isInitialized) return;
-            const newFrames = videoProcessorRef.current?.getNewFrames() || [];
-            if (newFrames.length > 0) {
-                const { frames, initialCollectionComplete, framesSinceLastInference } = frameCollectionRef.current;
-                frames.push(...newFrames);
-                frameCollectionRef.current.framesSinceLastInference += newFrames.length;
-                const target = initialCollectionComplete ? SUBSEQUENT_FRAMES : INITIAL_FRAMES;
-                const progress = Math.min(100, (frameCollectionRef.current.framesSinceLastInference / target) * 100);
-                if (!initialCollectionComplete) setBufferProgress(progress);
-                else setBufferProgress(100);
+    const inference = useInferenceWorker({
+        onStatus: setStatusMessage,
+        onResult: handleInferenceResults
+    });
 
-                if (!initialCollectionComplete && frames.length >= INITIAL_FRAMES) {
-                    inferenceWorkerRef.current?.postMessage({ type: 'inferenceResult', frameBuffer: frames.slice(-INITIAL_FRAMES), timestamp: window.performance.now(), isInitialBatch: true });
-                    frameCollectionRef.current.initialCollectionComplete = true;
-                    frameCollectionRef.current.framesSinceLastInference = 0;
-                    frameCollectionRef.current.frames = frames.slice(-OVERLAP_FRAMES);
-                } else if (initialCollectionComplete && frameCollectionRef.current.framesSinceLastInference >= SUBSEQUENT_FRAMES) {
-                    inferenceWorkerRef.current?.postMessage({ type: 'inferenceResult', frameBuffer: frames.slice(-INITIAL_FRAMES), timestamp: window.performance.now(), isInitialBatch: false });
-                    frameCollectionRef.current.framesSinceLastInference = 0;
-                    frameCollectionRef.current.frames = frames.slice(-OVERLAP_FRAMES);
-                }
-            }
-        }, 33);
-    }, [isInitialized, INITIAL_FRAMES, SUBSEQUENT_FRAMES, OVERLAP_FRAMES]);
+    const scheduler = useFrameScheduler({
+        getProcessor: () => capture.processorRef.current,
+        isReady: () => inference.isInitialized && isCapturingRef.current,
+        sendWindow: inference.sendWindow
+    });
+
+    useEffect(() => {
+        if (isChecking || !capabilities) return;
+        if (!capabilities.isCompatible) {
+            setStatusMessage({ message: '当前浏览器缺少 WebAssembly，无法运行本地推理。', type: 'error' });
+            return;
+        }
+        capture.ensureProcessor(selectedSceneRef.current);
+        setProcessorEpoch(v => v + 1);
+        capture.bindFaceLost(async () => {
+            scheduler.stop();
+            inference.stopCapture();
+            await capture.stop();
+            isCapturingRef.current = false;
+            setIsCapturing(false);
+            scheduler.setBufferProgress(0);
+            resetData();
+            cumulativeMetricsRef.current = emptyCumulative();
+            setStatusMessage({ message: '未检测到人脸。请重新开始采集。', type: 'warning' });
+        });
+        inference.initScene(selectedSceneRef.current);
+    }, [capabilities, isChecking]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const handleStartCapture = async () => {
         try {
-            if (videoProcessorRef.current) await videoProcessorRef.current.reset();
+            const scene = selectedSceneRef.current;
             resetData();
-            inferenceWorkerRef.current?.postMessage({ type: 'startCapture' });
-            await videoProcessorRef.current?.startCapture();
+            cumulativeMetricsRef.current = emptyCumulative();
+            inference.startCapture();
+            isCapturingRef.current = true;
+            await capture.startCamera(scene);
             setIsCapturing(true);
-            startMonitoring();
+            scheduler.start(scene);
             setStatusMessage({ message: '正在捕获指标数据...', type: 'success' });
-        } catch (e) {
+        } catch {
+            isCapturingRef.current = false;
+            inference.stopCapture();
             setIsCapturing(false);
             setStatusMessage({ message: '开启捕获失败', type: 'error' });
         }
     };
 
     const handleStopCapture = async () => {
+        isCapturingRef.current = false;
         setIsCapturing(false);
-        if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
-        inferenceWorkerRef.current?.postMessage({ type: 'stopCapture' });
-        await videoProcessorRef.current?.stopCapture();
+        scheduler.stop();
+        inference.stopCapture();
+        await capture.stop();
         setStatusMessage({ message: '捕获已停止。', type: 'info' });
     };
 
     const handleVideoFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (!file || !videoProcessorRef.current) return;
+        if (!file) return;
         try {
+            const scene = selectedSceneRef.current;
+            resetData();
+            cumulativeMetricsRef.current = emptyCumulative();
+            inference.startCapture();
+            isCapturingRef.current = true;
+            await capture.startVideoFile(scene, file);
             setIsCapturing(true);
-            await videoProcessorRef.current.loadVideoFile(file);
-            startMonitoring();
+            scheduler.start(scene);
             setStatusMessage({ message: `正在处理视频: ${file.name}`, type: 'success' });
-        } catch (err) {
+        } catch {
+            isCapturingRef.current = false;
+            inference.stopCapture();
             setIsCapturing(false);
             setStatusMessage({ message: '视频加载失败', type: 'error' });
         }
+        e.target.value = '';
     };
 
     const handleSceneChange = (id: SceneType) => {
         const scene = SCENES.find(s => s.id === id);
-        if (!scene) return;
+        if (!scene || isCapturingRef.current) return;
         setSelectedScene(scene);
-        setIsInitialized(false);
-        setBufferProgress(0);
+        selectedSceneRef.current = scene;
+        scheduler.resetCollection();
         resetData();
-        inferenceWorkerRef.current?.postMessage({ type: 'init', config: { modelPath: scene.modelPath, configPath: scene.configPath } });
+        cumulativeMetricsRef.current = emptyCumulative();
+        capture.ensureProcessor(scene);
+        setProcessorEpoch(v => v + 1);
+        inference.initScene(scene);
         setStatusMessage({ message: `正在准备 ${scene.name} 场景...`, type: 'info' });
     };
 
-    const isReady = (isCapturing || vitalSigns.heartRate > 0) && bufferProgress >= 100;
-    const avgHeartRate = cumulativeMetricsRef.current.heartRateCount > 0 ? cumulativeMetricsRef.current.heartRateSum / cumulativeMetricsRef.current.heartRateCount : 0;
-    const avgRespRate = cumulativeMetricsRef.current.respRateCount > 0 ? cumulativeMetricsRef.current.respRateSum / cumulativeMetricsRef.current.respRateCount : 0;
+    const handleExport = async () => {
+        try {
+            const data = await inference.requestExport();
+            const blob = new Blob([JSON.stringify({
+                ...data,
+                scene: {
+                    id: selectedScene.id,
+                    name: selectedScene.name,
+                    model: selectedScene.shortModelName,
+                    preprocess: selectedScene.preprocess,
+                    tasks: selectedScene.tasks
+                }
+            }, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `biopulse-data-${Date.now()}.json`;
+            link.click();
+            URL.revokeObjectURL(url);
+        } catch {
+            setStatusMessage({ message: '导出失败：暂无完整测量数据', type: 'warning' });
+        }
+    };
 
-    if (isChecking) return <div className="h-screen flex items-center justify-center font-black italic uppercase text-slate-400">Initializing Biopulse...</div>;
+    const handleGenerateReport = async () => {
+        try {
+            const data = await inference.requestExport();
+            setReportData(data);
+        } catch {
+            setStatusMessage({ message: '无法生成报告：请先完成一次测量', type: 'warning' });
+        }
+    };
+
+    const showResp = sceneHasTask(selectedScene, 'resp');
+    const isReady = (isCapturing || vitalSigns.heartRate > 0 || vitalSigns.bvpSignal.length > 0)
+        && scheduler.bufferProgress >= 100;
+    const avgHeartRate = cumulativeMetricsRef.current.heartRateCount > 0
+        ? cumulativeMetricsRef.current.heartRateSum / cumulativeMetricsRef.current.heartRateCount
+        : 0;
+    const avgRespRate = cumulativeMetricsRef.current.respRateCount > 0
+        ? cumulativeMetricsRef.current.respRateSum / cumulativeMetricsRef.current.respRateCount
+        : 0;
+
+    if (isChecking) {
+        return <div className="h-screen flex items-center justify-center font-black italic uppercase text-slate-400">Initializing MaiXi...</div>;
+    }
 
     return (
         <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center py-12 px-6 lg:px-12 relative overflow-hidden font-sans">
@@ -294,19 +259,21 @@ const App: React.FC = () => {
             <div className="w-full max-w-[1720px] flex flex-col gap-12 relative z-10">
                 <header className="flex flex-col md:flex-row items-center justify-between border-b border-slate-200 pb-10 gap-8">
                     <div className="flex items-center gap-8">
-                        <div className="p-5 bg-rose-500/10 rounded-[2rem] border border-rose-500/10 shadow-[0_15px_35px_rgba(225,29,72,0.1)]">
-                            <Activity className="w-12 h-12 text-rose-500 animate-pulse" />
-                        </div>
+                        <img
+                            src="/brand/favicon.svg"
+                            alt="脉息 · MaiXi"
+                            className="w-20 h-20 rounded-[1.8rem] shadow-[0_15px_35px_rgba(13,94,66,0.18)] ring-1 ring-[#0D5E42]/10"
+                        />
                         <div>
                             <h1
                                 className="text-5xl font-black tracking-tighter uppercase italic leading-none flex flex-col cursor-pointer hover:opacity-80 transition-opacity"
                                 onClick={() => setIsAboutModalOpen(true)}
                             >
-                                <span className="text-slate-950">BioPulse</span>
-                                <span className="text-rose-600 not-italic text-2xl mt-1">3.2 <span className="text-slate-300 text-sm italic lowercase tracking-wider ml-2">生理信号协议验证</span></span>
+                                <span className="text-slate-950">脉息 · MaiXi</span>
+                                <span className="text-rose-600 not-italic text-2xl mt-1">3.2 <span className="text-slate-300 text-sm italic lowercase tracking-wider ml-2">远程视觉生理感知</span></span>
                             </h1>
                             <div className="mt-3">
-                                <span className="text-xs text-slate-400 font-black uppercase tracking-[0.3em]">评估协议 版本 v3.2</span>
+                                <span className="text-xs text-slate-400 font-black uppercase tracking-[0.3em]">光映微澜，脉息自明</span>
                             </div>
                         </div>
                     </div>
@@ -327,7 +294,6 @@ const App: React.FC = () => {
                 />
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
-                    {/* Left Monitor: Video Feedback */}
                     <div className="lg:col-span-3 xl:col-span-4 space-y-8">
                         <div className="bg-white rounded-[3.5rem] p-10 shadow-[0_30px_70px_rgba(0,0,0,0.04)] border border-slate-200 relative overflow-hidden group">
                             <div className="flex items-center justify-between mb-8">
@@ -339,85 +305,53 @@ const App: React.FC = () => {
                                     <div className="flex gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400 pl-[3.25rem]">
                                         <span>请将面部置于椭圆框内</span>
                                         <span className="text-slate-300 mx-1">•</span>
-                                        <span>正在使用中心区域进行处理</span>
+                                        <span>{selectedScene.shortModelName} · {selectedScene.frameWidth}×{selectedScene.frameHeight}</span>
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-4 bg-slate-50 rounded-[2rem] px-5 py-3 border border-slate-100 shadow-sm relative overflow-hidden">
-                                    {!isInitialized && <div className="absolute bottom-0 left-0 w-full h-1 bg-slate-100"><div className="h-full bg-blue-500 animate-pulse" style={{ width: '40%' }}></div></div>}
+                                    {!inference.isInitialized && <div className="absolute bottom-0 left-0 w-full h-1 bg-slate-100"><div className="h-full bg-blue-500 animate-pulse" style={{ width: '40%' }}></div></div>}
                                     <div className="flex flex-col items-end gap-0.5">
                                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.1em]">引擎状态</span>
                                         <div className="flex items-center gap-2">
-                                            <div className={`w-2 h-2 rounded-full ${isInitialized ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-amber-400 animate-pulse'}`}></div>
-                                            <span className="text-sm font-black text-slate-900 uppercase tracking-tight italic">{isInitialized ? '信号锁定开启' : '引擎初始化中'}</span>
+                                            <div className={`w-2 h-2 rounded-full ${inference.isInitialized ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-amber-400 animate-pulse'}`}></div>
+                                            <span className="text-sm font-black text-slate-900 uppercase tracking-tight italic">{inference.isInitialized ? '信号锁定开启' : '引擎初始化中'}</span>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                             <VideoDisplay
-                                videoProcessor={videoProcessorRef.current}
-                                faceDetected={vitalSigns.heartRate > 0 || isCapturing}
-                                bufferProgress={bufferProgress}
+                                key={processorEpoch}
+                                videoProcessor={capture.processorRef.current}
+                                faceDetected={capture.processorRef.current?.isFaceDetected() || false}
+                                bufferProgress={scheduler.bufferProgress}
                                 isCapturing={isCapturing}
                             />
 
                             <div className="mt-10 pt-10 border-t border-slate-100">
                                 <Controls
-                                    isInitialized={isInitialized}
+                                    isInitialized={inference.isInitialized}
                                     isCapturing={isCapturing}
                                     onStart={handleStartCapture}
                                     onStop={handleStopCapture}
                                     onVideoFileSelected={handleVideoFileSelected}
-                                    onExport={() => {
-                                        // Handle raw data export
-                                        const exportBlob = new Blob([JSON.stringify({
-                                            timestamp: new Date().toISOString(),
-                                            vitalSigns,
-                                            scene: selectedScene.name
-                                        }, null, 2)], { type: 'application/json' });
-                                        const url = URL.createObjectURL(exportBlob);
-                                        const link = document.createElement('a');
-                                        link.href = url;
-                                        link.download = `biopulse-data-${new Date().getTime()}.json`;
-                                        link.click();
-                                    }}
-                                    onGenerateReport={() => {
-                                        setReportData({
-                                            metadata: {
-                                                samplingRate: 30,
-                                                startTime: new Date(Date.now() - 30000).toISOString(),
-                                                endTime: new Date().toISOString(),
-                                                totalSamples: vitalSigns.bvpSignal.length
-                                            },
-                                            signals: {
-                                                bvp: { raw: vitalSigns.bvpSignal },
-                                                resp: { raw: vitalSigns.respSignal }
-                                            },
-                                            rates: {
-                                                heart: [{ timestamp: new Date().toISOString(), value: vitalSigns.heartRate, snr: vitalSigns.bvpSNR, quality: vitalSigns.bvpQuality }],
-                                                respiratory: [{ timestamp: new Date().toISOString(), value: vitalSigns.respRate, snr: vitalSigns.respSNR, quality: vitalSigns.respQuality }]
-                                            },
-                                            timestamps: []
-                                        });
-                                    }}
+                                    onExport={handleExport}
+                                    onGenerateReport={handleGenerateReport}
                                 />
                             </div>
                             <div className="mt-8 pt-8 border-t border-slate-100 relative z-10 w-full">
-                                {/* Global Metrics Row placed at the very bottom INSIDE Video Capture */}
                                 <GlobalMetricsRow
                                     vitalSigns={vitalSigns}
                                     avgHeartRate={avgHeartRate}
                                     avgRespRate={avgRespRate}
                                     isReady={isReady}
-                                    bufferProgress={bufferProgress}
+                                    bufferProgress={scheduler.bufferProgress}
+                                    hideResp={!showResp}
                                 />
                             </div>
-
-                            {/* Micro-grid background for the video monitor card */}
                             <div className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,_rgba(0,0,0,0.01)_1px,_transparent_0)] bg-[size:24px_24px] pointer-events-none opacity-40"></div>
                         </div>
                     </div>
 
-                    {/* Right Control Hub: Main Dashboard */}
                     <div className="lg:col-span-9 xl:col-span-8 flex flex-col gap-8">
                         <div className="animate-slide-up transform-gpu">
                             <MainDashboard
@@ -430,7 +364,7 @@ const App: React.FC = () => {
                                 minRespRate={cumulativeMetricsRef.current.respRateMin}
                                 maxRespRate={cumulativeMetricsRef.current.respRateMax}
                                 isReady={isReady}
-                                bufferProgress={bufferProgress}
+                                bufferProgress={scheduler.bufferProgress}
                             />
                         </div>
                     </div>
@@ -439,8 +373,11 @@ const App: React.FC = () => {
                 <footer className="bg-white/60 backdrop-blur-md rounded-[3rem] p-10 border border-slate-200 flex flex-col md:flex-row justify-between items-center gap-8">
                     <div className="max-w-2xl flex items-center gap-8">
                         <div>
-                            <span className="text-xs font-black uppercase tracking-[0.2em] text-slate-500 block mb-2">医学 rPPG 实验室合规性</span>
-                            <p className="text-xs text-slate-500 leading-relaxed font-medium">本系统采用 rPhys 深度神经网络模型进行非接触式生理信号提取。仅作为健康参考或科研评估用途，严禁作为临床诊断依据。</p>
+                            <span className="text-xs font-black uppercase tracking-[0.2em] text-slate-500 block mb-2">测量协议说明</span>
+                            <p className="text-xs text-slate-500 leading-relaxed font-medium">
+                                默认「标准健康监测」与 mmrphys-live-base 对齐（SCAMPS /255、12 s 起算、30 s FFT）。
+                                各场景仅展示该模型真实输出的任务。本系统仅作科研与健康参考，不作临床诊断。
+                            </p>
                         </div>
                     </div>
                     <div className="flex gap-4 items-center">
@@ -450,32 +387,27 @@ const App: React.FC = () => {
                                 <div className="flex items-center justify-center gap-2">
                                     <div className={`w-1.5 h-1.5 rounded-full ${statusMessage.type === 'error' ? 'bg-rose-500' : statusMessage.type === 'warning' ? 'bg-amber-500' : 'bg-emerald-500'} ${statusMessage.type === 'info' ? 'animate-pulse' : ''}`} />
                                     <span className={`text-xs font-black tracking-widest lowercase ${statusMessage.type === 'error' ? 'text-rose-600' : statusMessage.type === 'warning' ? 'text-amber-600' : 'text-emerald-600'}`}>
-                                        {statusMessage.type === 'error' ? '系统出错' : statusMessage.type === 'warning' ? '系统警告' : '系统就绪'}
-                                        {statusMessage.message ? ` - ${statusMessage.message}` : ''}
+                                        {statusMessage.message}
                                     </span>
                                 </div>
                             </div>
                         )}
                         <div className="px-5 py-2 bg-white rounded-2xl border border-slate-200 shadow-sm text-center">
                             <span className="text-xs font-black text-slate-400 uppercase block mb-1">编译版本</span>
-                            <span className="text-xs font-black text-slate-900 tracking-widest lowercase">v3.2.0-LITE</span>
-                        </div>
-                        <div className="px-5 py-2 bg-white rounded-2xl border border-slate-200 shadow-sm text-center">
-                            <span className="text-xs font-black text-slate-400 uppercase block mb-1">协议同步</span>
-                            <span className="text-xs font-black text-emerald-600 tracking-widest lowercase">已加密</span>
+                            <span className="text-xs font-black text-slate-900 tracking-widest lowercase">v3.2.1-protocol</span>
                         </div>
                     </div>
                 </footer>
-            </div >
+            </div>
 
             {reportData && (
                 <div className="fixed inset-0 z-50 bg-slate-950/20 backdrop-blur-xl flex items-center justify-center p-8">
-                    <div id="report-container" className="report-canvas w-full max-w-5xl h-[90vh] overflow-y-auto bg-white rounded-[4rem] shadow-2xl relative">
+                    <div className="w-full max-w-5xl h-[90vh] overflow-y-auto bg-white rounded-[4rem] shadow-2xl relative">
                         <ReportView data={reportData} onClose={() => setReportData(null)} />
                     </div>
                 </div>
             )}
-        </div >
+        </div>
     );
 };
 

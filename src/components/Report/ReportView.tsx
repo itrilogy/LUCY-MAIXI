@@ -7,7 +7,7 @@ interface ReportViewProps {
     onClose?: () => void;
 }
 
-const ReportView: React.FC<ReportViewProps> = ({ data, id = 'physiological-report' }) => {
+const ReportView: React.FC<ReportViewProps> = ({ data, id = 'physiological-report', onClose }) => {
     if (!data) return null;
 
     const { metadata, rates, signals } = data;
@@ -64,11 +64,28 @@ const ReportView: React.FC<ReportViewProps> = ({ data, id = 'physiological-repor
                 color: '#333',
                 fontFamily: '"Microsoft YaHei", sans-serif',
                 boxSizing: 'border-box',
-                position: 'absolute',
-                left: '-9999px',
-                top: 0
+                position: 'relative',
+                margin: '0 auto'
             }}
         >
+            {onClose && (
+                <button
+                    onClick={onClose}
+                    style={{
+                        position: 'absolute',
+                        right: 24,
+                        top: 24,
+                        border: '1px solid #e0e0e0',
+                        background: '#fff',
+                        borderRadius: 20,
+                        padding: '6px 14px',
+                        cursor: 'pointer',
+                        fontSize: 12
+                    }}
+                >
+                    关闭
+                </button>
+            )}
             {/* ... Header, Basic Info, Results Summary as before ... */}
             <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #006969', paddingBottom: '10px', marginBottom: '20px' }}>
                 <h1 style={{ color: '#006969', margin: 0, fontSize: '24px' }}>非接触式面部生理指标检测报告</h1>
@@ -139,7 +156,7 @@ const ReportView: React.FC<ReportViewProps> = ({ data, id = 'physiological-repor
 
             {/* Footer */}
             <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '10px', color: '#aaa' }}>
-                由 MMRPhys-Live 生理监测系统自动生成
+                由脉息 · MaiXi（基于 MMRPhys-Live）自动生成 · 鹿溪联合创新实验室
             </div>
         </div>
     );

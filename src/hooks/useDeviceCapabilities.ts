@@ -36,18 +36,15 @@ export const useDeviceCapabilities = () => {
                     typeof WebAssembly.instantiate === 'function';
 
                 // Get performance capabilities
+                const nav = navigator as unknown as { deviceMemory?: number; connection?: { effectiveType?: string } };
                 const performance = {
-                    memory: (navigator as any).deviceMemory || 4,
+                    memory: nav.deviceMemory || 4,
                     cores: navigator.hardwareConcurrency || 2,
-                    connection: (navigator as any).connection?.effectiveType || '4g'
+                    connection: nav.connection?.effectiveType || '4g'
                 };
 
                 // Check if device meets minimum requirements
-                const isCompatible = hasCamera &&
-                    hasWebGL &&
-                    hasWebAssembly &&
-                    performance.memory >= 2 &&
-                    performance.cores >= 2;
+                const isCompatible = hasWebAssembly && performance.cores >= 1;
 
                 setCapabilities({
                     hasCamera,
