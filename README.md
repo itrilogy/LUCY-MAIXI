@@ -1,9 +1,31 @@
-# 脉息 · MaiXi（PulseStream）- 远程视觉生理感知平台
+<div align="center">
+  <img src="public/brand/favicon.svg" width="88" height="88" alt="脉息 · MaiXi" />
+  &nbsp;&nbsp;
+  <img src="public/brand/luxi-lab-main.svg" width="88" height="88" alt="鹿溪联合创新实验室" />
+</div>
 
-> **光映微澜，脉息自明**  
-> 出品：**鹿溪联合创新实验室**（LUXI Joint Innovation Lab）
+<h1 align="center">脉息 · MaiXi（PulseStream）· 远程视觉生理感知平台</h1>
+
+<p align="center">
+  <strong>光映微澜，脉息自明</strong><br/>
+  出品：<b>鹿溪联合创新实验室</b>（LUXI Joint Innovation Lab）
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Product-脉息%20MaiXi-0D5E42" alt="product" />
+  <img src="https://img.shields.io/badge/Lab-鹿溪联合创新实验室-047538" alt="lab" />
+  <img src="https://img.shields.io/badge/Stack-React%20%7C%20ONNX%20Runtime%20Web-blue" alt="stack" />
+</p>
+
+<p align="center">
+  仓库：<a href="https://github.com/itrilogy/LUCY-MAIXI">itrilogy/LUCY-MAIXI</a>
+</p>
+
+---
 
 **脉息 · MaiXi**（工程代号 PulseStream / BioPulse）是一个基于视觉的远程生理感知 (rPPG) Web 平台。本项目在上游开源项目的基础之上进行了深度的工程化与场景化拓展，突破了单一模型的局限，引入了多模型、多场景矩阵架构，能够直接从普通网络摄像头视频流中无感提取心率 (Heart Rate) 和呼吸率 (Respiratory Rate)。
+
+仓库：<https://github.com/itrilogy/LUCY-MAIXI>
 
 ## 出品方
 鹿溪联合创新实验室（LUXI Joint Innovation Lab）
@@ -32,8 +54,8 @@
 
 If you utilize the MMRPhys model or this web application in your research, please cite the following papers:
 1. Jitesh Joshi and Youngjun Cho, "Efficient and Robust Multidimensional Attention in Remote Physiological Sensing through Target Signal Constrained Factorization", 2025. arXiv: 2505.07013 [cs.CV]
-2. Jitesh Joshi, Youngjun Cho, and Sos Agaian, “FactorizePhys: Effective Spatial-Temporal Attention in Remote Photo-plethysmography through Factorization of Voxel Embeddings”, NeurIPS, 2024.
-3. Jitesh Joshi and Youngjun Cho, “iBVP Dataset: RGB-thermal rPPG Dataset with High Resolution Signal Quality Labels”, MDPI Electronics, 13(7), 2024.
+2. Jitesh Joshi, Youngjun Cho, and Sos Agaian, "FactorizePhys: Effective Spatial-Temporal Attention in Remote Photo-plethysmography through Factorization of Voxel Embeddings", NeurIPS, 2024.
+3. Jitesh Joshi and Youngjun Cho, "iBVP Dataset: RGB-thermal rPPG Dataset with High Resolution Signal Quality Labels", MDPI Electronics, 13(7), 2024.
 
 **rPPG-Toolbox Related**
 
@@ -57,7 +79,11 @@ If you find our paper or this toolbox useful for your research, please cite our 
 - 授予摄像头访问权限的现代 Web 浏览器
 
 ### 本地部署 (Installation & Run)
-1. 克隆本仓库并进入根目录。
+1. 克隆本仓库并进入根目录：
+   ```bash
+   git clone https://github.com/itrilogy/LUCY-MAIXI.git
+   cd LUCY-MAIXI
+   ```
 2. 安装环境依赖：
    ```bash
    npm install
