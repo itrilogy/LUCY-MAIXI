@@ -25,8 +25,6 @@
 
 **脉息 · MaiXi**（工程代号 PulseStream / BioPulse）是一个基于视觉的远程生理感知 (rPPG) Web 平台。本项目在上游开源项目的基础之上进行了深度的工程化与场景化拓展，突破了单一模型的局限，引入了多模型、多场景矩阵架构，能够直接从普通网络摄像头视频流中无感提取心率 (Heart Rate) 和呼吸率 (Respiratory Rate)。
 
-仓库：<https://github.com/itrilogy/LUCY-MAIXI>
-
 ## 出品方
 鹿溪联合创新实验室（LUXI Joint Innovation Lab）
 
